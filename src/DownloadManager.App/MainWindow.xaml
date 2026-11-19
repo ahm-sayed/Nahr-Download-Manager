@@ -1,0 +1,1122 @@
+<Window x:Class="DownloadManager.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{Binding [app_name], Source={StaticResource Loc}}"
+        Icon="pack://application:,,,/Assets/nahr.ico"
+        Width="1120" Height="660" MinWidth="820" MinHeight="520"
+        WindowStartupLocation="CenterScreen"
+        ShowInTaskbar="True"
+        Background="{DynamicResource WindowBackground}"
+        Foreground="{DynamicResource TextPrimary}"
+        FontFamily="Segoe UI" FontSize="13"
+        FlowDirection="{Binding IsRtl, Converter={StaticResource RtlToFlow}}"
+        AllowDrop="True" DragOver="OnDragOver" Drop="OnDrop"
+        WindowState="Normal"
+        ResizeMode="CanResize">
+
+    <Window.InputBindings>
+        <KeyBinding Gesture="Ctrl+N" Command="{Binding AddUrlCommand}"/>
+        <KeyBinding Key="Escape" Command="{Binding AddDialog.CancelCommand}"/>
+    </Window.InputBindings>
+
+    <Grid>
+        <!-- ============================ Main Shell ============================ -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="236"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+                    <!-- ============================ Sidebar ============================ -->
+                    <Border Grid.Column="0" Background="{DynamicResource SidebarBackground}"
+                            BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,0,1,0">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="14,14,14,14">
+
+                                <!-- Brand Hero Card -->
+                                <Border Background="{DynamicResource HeroCardBrush}" BorderBrush="{DynamicResource BorderSoft}"
+                                        BorderThickness="1" CornerRadius="12" Padding="12,10" Margin="0,0,0,12">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="pack://application:,,,/Assets/logo.png" Width="36" Height="36"
+                                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                                        <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding [app_name], Source={StaticResource Loc}}" FontSize="17" FontWeight="Bold"/>
+                                            <TextBlock Style="{StaticResource SecondaryText}" FontSize="11"
+                                                       Text="{Binding [app_tagline], Source={StaticResource Loc}}"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Quick Primary CTA in Sidebar -->
+                                <Button Style="{StaticResource AccentButton}" Command="{Binding AddUrlCommand}" Margin="0,0,0,12" Padding="12,9">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE710;" FontSize="12.5" Margin="0,0,8,0"/>
+                                        <TextBlock Text="{Binding [add_url], Source={StaticResource Loc}}" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                </Button>
+
+                                <!-- Nav: Downloads -->
+                                <Button Command="{Binding ShowDownloadsCommand}" Margin="0,0,0,3">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsDownloadsPage}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource SelectedBrush}"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE896;" Width="24" FontSize="13.5"/>
+                                        <TextBlock Text="{Binding [nav_downloads], Source={StaticResource Loc}}"/>
+                                    </StackPanel>
+                                </Button>
+
+                                <!-- Nav: Settings -->
+                                <Button Command="{Binding ShowSettingsCommand}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsSettingsPage}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource SelectedBrush}"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE713;" Width="24" FontSize="13.5"/>
+                                        <TextBlock Text="{Binding [nav_settings], Source={StaticResource Loc}}"/>
+                                    </StackPanel>
+                                </Button>
+
+                                <Border Height="1" Background="{DynamicResource BorderSoft}" Margin="6,10,6,0"/>
+
+                                <!-- Status Filters -->
+                                <TextBlock Style="{StaticResource LabelText}" Text="{Binding [status_filters], Source={StaticResource Loc}}"/>
+                                <ListBox Style="{StaticResource NavListBox}" ItemsSource="{Binding Filters}"
+                                         SelectedItem="{Binding SelectedFilter, Mode=TwoWay}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="24"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Style="{StaticResource IconText}" Text="{Binding Glyph}" FontSize="13"
+                                                           Foreground="{DynamicResource TextSecondary}"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding Title}" VerticalAlignment="Center" FontSize="12.5"/>
+                                                <Border Grid.Column="2" Background="{DynamicResource BadgeBrush}" CornerRadius="9"
+                                                        Padding="7,1.5" MinWidth="22" HorizontalAlignment="Center">
+                                                    <TextBlock Text="{Binding Count}" FontSize="11" FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource BadgeTextBrush}" HorizontalAlignment="Center"/>
+                                                </Border>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+
+                                <Border Height="1" Background="{DynamicResource BorderSoft}" Margin="6,8,6,0"/>
+
+                                <!-- Categories -->
+                                <TextBlock Style="{StaticResource LabelText}" Text="{Binding [categories], Source={StaticResource Loc}}"/>
+                                <ListBox Style="{StaticResource NavListBox}" ItemsSource="{Binding Categories}"
+                                         SelectedItem="{Binding SelectedCategory, Mode=TwoWay}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="24"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Style="{StaticResource IconText}" Text="{Binding Glyph}" FontSize="13"
+                                                           Foreground="{DynamicResource TextSecondary}"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding Title}" VerticalAlignment="Center" FontSize="12.5"/>
+                                                <Border Grid.Column="2" Background="{DynamicResource BadgeBrush}" CornerRadius="9"
+                                                        Padding="7,1.5" MinWidth="22" HorizontalAlignment="Center">
+                                                    <TextBlock Text="{Binding Count}" FontSize="11" FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource BadgeTextBrush}" HorizontalAlignment="Center"/>
+                                                </Border>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+
+                    <!-- ============================ Compact Downloads Workspace ============================ -->
+                    <Grid Grid.Column="1" Margin="18,12,18,10"
+                          Visibility="{Binding IsDownloadsPage, Converter={StaticResource BoolToVis}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Row 0: Slim Compact KPI Strip -->
+                        <Grid Grid.Row="0" Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderSoft}"
+                                    BorderThickness="1" CornerRadius="10" Padding="12,7" Margin="0,0,6,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="28" Height="28" CornerRadius="8" Background="{DynamicResource CatImageBg}" Margin="0,0,10,0">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xEC4A;" FontSize="13"
+                                                   Foreground="{DynamicResource CatImageFg}" HorizontalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Style="{StaticResource SecondaryText}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,8,0"
+                                               Text="{Binding [sb_speed], Source={StaticResource Loc}}"/>
+                                    <TextBlock Text="{Binding TotalSpeedText}" FontSize="13.5" FontWeight="Bold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="1" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderSoft}"
+                                    BorderThickness="1" CornerRadius="10" Padding="12,7" Margin="3,0,3,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="28" Height="28" CornerRadius="8" Background="{DynamicResource CatProgramBg}" Margin="0,0,10,0">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE896;" FontSize="13"
+                                                   Foreground="{DynamicResource CatProgramFg}" HorizontalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Style="{StaticResource SecondaryText}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,8,0"
+                                               Text="{Binding [sb_active], Source={StaticResource Loc}}"/>
+                                    <TextBlock Text="{Binding ActiveCount}" FontSize="13.5" FontWeight="Bold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderSoft}"
+                                    BorderThickness="1" CornerRadius="10" Padding="12,7" Margin="6,0,0,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="28" Height="28" CornerRadius="8" Background="{DynamicResource CatVideoBg}" Margin="0,0,10,0">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE8B7;" FontSize="13"
+                                                   Foreground="{DynamicResource CatVideoFg}" HorizontalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Style="{StaticResource SecondaryText}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,8,0"
+                                               Text="{Binding [sb_total], Source={StaticResource Loc}}"/>
+                                    <TextBlock Text="{Binding TotalCount}" FontSize="13.5" FontWeight="Bold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!-- Row 1: Unified Command, Multi-Selection & Search Bar -->
+                        <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderSoft}"
+                                BorderThickness="1" CornerRadius="10" Padding="10,6" Margin="0,0,0,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="240"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Standard Bulk Actions (shown when 0 items are checked) -->
+                                <StackPanel Grid.Column="0" Orientation="Horizontal"
+                                            Visibility="{Binding ShowStandardToolbar, Converter={StaticResource BoolToVis}}">
+                                    <Button Style="{StaticResource SubtleButton}" Padding="10,6" Command="{Binding PauseAllCommand}" Margin="0,0,4,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource IconText}" Text="&#xE769;" FontSize="11.5"
+                                                       Foreground="{DynamicResource WarningBrush}" Margin="0,0,6,0"/>
+                                            <TextBlock Text="{Binding [pause_all], Source={StaticResource Loc}}" FontSize="12" FontWeight="Medium"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button Style="{StaticResource SubtleButton}" Padding="10,6" Command="{Binding ResumeAllCommand}" Margin="0,0,4,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource IconText}" Text="&#xE768;" FontSize="11.5"
+                                                       Foreground="{DynamicResource SuccessBrush}" Margin="0,0,6,0"/>
+                                            <TextBlock Text="{Binding [resume_all], Source={StaticResource Loc}}" FontSize="12" FontWeight="Medium"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button Style="{StaticResource SubtleButton}" Padding="10,6" Command="{Binding ClearCompletedCommand}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource IconText}" Text="&#xE74D;" FontSize="11.5"
+                                                       Foreground="{DynamicResource TextSecondary}" Margin="0,0,6,0"/>
+                                            <TextBlock Text="{Binding [clear_completed], Source={StaticResource Loc}}" FontSize="12" FontWeight="Medium"/>
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+
+                                <!-- Contextual Multi-Select Action Bar (shown when 1+ items are checked) -->
+                                <StackPanel Grid.Column="0" Orientation="Horizontal"
+                                            Visibility="{Binding HasCheckedItems, Converter={StaticResource BoolToVis}}">
+                                    <Border Background="{DynamicResource SelectedBrush}" BorderBrush="{DynamicResource AccentBrush}"
+                                            BorderThickness="1" CornerRadius="7" Padding="10,4" Margin="0,0,8,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding CheckedCountText}" FontSize="11.5" FontWeight="Bold"
+                                                   Foreground="{DynamicResource AccentBrush}"/>
+                                    </Border>
+
+                                    <Button Style="{StaticResource SubtleButton}" Padding="9,5" Margin="0,0,3,0"
+                                            Command="{Binding ResumeCheckedCommand}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource IconText}" Text="&#xE768;" FontSize="11"
+                                                       Foreground="{DynamicResource SuccessBrush}" Margin="0,0,5,0"/>
+                                            <TextBlock Text="{Binding [act_resume], Source={StaticResource Loc}}" FontSize="12"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button Style="{StaticResource SubtleButton}" Padding="9,5" Margin="0,0,3,0"
+                                            Command="{Binding PauseCheckedCommand}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource IconText}" Text="&#xE769;" FontSize="11"
+                                                       Foreground="{DynamicResource WarningBrush}" Margin="0,0,5,0"/>
+                                            <TextBlock Text="{Binding [act_pause], Source={StaticResource Loc}}" FontSize="12"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button Style="{StaticResource SubtleButton}" Padding="9,5" Margin="0,0,3,0"
+                                            Command="{Binding CancelCheckedCommand}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource IconText}" Text="&#xE711;" FontSize="11"
+                                                       Foreground="{DynamicResource TextSecondary}" Margin="0,0,5,0"/>
+                                            <TextBlock Text="{Binding [act_cancel], Source={StaticResource Loc}}" FontSize="12"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button Style="{StaticResource SubtleButton}" Padding="9,5" Margin="0,0,3,0"
+                                            Command="{Binding RemoveCheckedCommand}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource IconText}" Text="&#xE738;" FontSize="11"
+                                                       Foreground="{DynamicResource TextPrimary}" Margin="0,0,5,0"/>
+                                            <TextBlock Text="{Binding [act_remove], Source={StaticResource Loc}}" FontSize="12"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button Style="{StaticResource SubtleButton}" Padding="9,5" Margin="0,0,4,0"
+                                            Command="{Binding DeleteCheckedFilesCommand}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource IconText}" Text="&#xE74D;" FontSize="11"
+                                                       Foreground="{DynamicResource DangerBrush}" Margin="0,0,5,0"/>
+                                            <TextBlock Text="{Binding [sel_delete_disk], Source={StaticResource Loc}}"
+                                                       Foreground="{DynamicResource DangerBrush}" FontWeight="SemiBold" FontSize="12"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button Style="{StaticResource SubtleButton}" Padding="8,5"
+                                            Command="{Binding ClearSelectionCommand}"
+                                            Content="{Binding [sel_clear], Source={StaticResource Loc}}"/>
+                                </StackPanel>
+
+                                <!-- Toggle Bottom Details Drawer -->
+                                <Button Grid.Column="2" Style="{StaticResource SubtleButton}" Padding="10,6" Margin="0,0,8,0"
+                                        Command="{Binding ToggleDetailsDrawerCommand}"
+                                        ToolTip="{Binding [det_title], Source={StaticResource Loc}}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE946;" FontSize="12" Margin="0,0,6,0"/>
+                                        <TextBlock Text="{Binding [toggle_details], Source={StaticResource Loc}}" FontSize="12"/>
+                                    </StackPanel>
+                                </Button>
+
+                                <!-- Search Box -->
+                                <Grid Grid.Column="3">
+                                    <TextBox Style="{StaticResource NahrTextBox}" Background="{DynamicResource SurfaceAltBrush}" Padding="10,6"
+                                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <StackPanel Orientation="Horizontal" IsHitTestVisible="False" Margin="10,0" VerticalAlignment="Center">
+                                        <TextBlock Text="&#xE721;" FontSize="12" Foreground="{DynamicResource TextTertiary}" Margin="0,0,7,0">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock" BasedOn="{StaticResource IconText}">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding SearchText}" Value="">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding [search_placeholder], Source={StaticResource Loc}}" FontSize="12"
+                                                   Foreground="{DynamicResource TextTertiary}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding SearchText}" Value="">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <!-- Row 2: Compact Table Column Header Bar (with Select-All Checkbox) -->
+                        <Border Grid.Row="2" Background="{DynamicResource SurfaceAltBrush}" BorderBrush="{DynamicResource BorderSoft}"
+                                BorderThickness="1" CornerRadius="8" Padding="10,5" Margin="0,0,0,4">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="28"/>
+                                    <ColumnDefinition Width="32"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="136"/>
+                                    <ColumnDefinition Width="138"/>
+                                    <ColumnDefinition Width="134"/>
+                                    <ColumnDefinition Width="148"/>
+                                </Grid.ColumnDefinitions>
+
+                                <CheckBox Grid.Column="0" Style="{StaticResource RowSelectCheckBox}"
+                                          IsChecked="{Binding IsAllChecked, Mode=TwoWay}"
+                                          ToolTip="{Binding [sel_all], Source={StaticResource Loc}}"/>
+                                <TextBlock Grid.Column="2" Text="{Binding [col_name], Source={StaticResource Loc}}"
+                                           FontSize="11.5" FontWeight="SemiBold" Style="{StaticResource SecondaryText}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="3" Text="{Binding [col_size], Source={StaticResource Loc}}"
+                                           FontSize="11.5" FontWeight="SemiBold" Style="{StaticResource SecondaryText}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="4" Text="{Binding [col_progress], Source={StaticResource Loc}}"
+                                           FontSize="11.5" FontWeight="SemiBold" Style="{StaticResource SecondaryText}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="5" Text="{Binding [col_status], Source={StaticResource Loc}}"
+                                           FontSize="11.5" FontWeight="SemiBold" Style="{StaticResource SecondaryText}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="6" Text="{Binding [col_actions], Source={StaticResource Loc}}"
+                                           FontSize="11.5" FontWeight="SemiBold" Style="{StaticResource SecondaryText}" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Row 3: Compact High-Density Downloads & Expandable Playlists List + Empty State -->
+                        <Grid Grid.Row="3">
+                            <ListBox ItemsSource="{Binding VisibleDownloads}" SelectedItem="{Binding SelectedDownload, Mode=TwoWay}"
+                                     Background="Transparent" BorderThickness="0"
+                                     ItemContainerStyle="{StaticResource DownloadCardItem}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="{Binding [act_progress_win], Source={StaticResource Loc}}" Command="{Binding OpenProgressWindowCommand}"/>
+                                                    <MenuItem Header="{Binding [act_open], Source={StaticResource Loc}}" Command="{Binding OpenCommand}"/>
+                                                    <MenuItem Header="{Binding [act_open_folder], Source={StaticResource Loc}}" Command="{Binding OpenFolderCommand}"/>
+                                                    <Separator/>
+                                                    <MenuItem Header="{Binding [act_remove], Source={StaticResource Loc}}" Command="{Binding RemoveCommand}"/>
+                                                    <MenuItem Header="{Binding [act_delete], Source={StaticResource Loc}}" Command="{Binding DeleteFileCommand}"/>
+                                                </ContextMenu>
+                                            </Grid.ContextMenu>
+
+                                            <!-- ==================== A) SINGLE FILE COMPACT ROW (~38px) ==================== -->
+                                            <Grid Visibility="{Binding IsSingleItem, Converter={StaticResource BoolToVis}}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="28"/>
+                                                    <ColumnDefinition Width="32"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="136"/>
+                                                    <ColumnDefinition Width="138"/>
+                                                    <ColumnDefinition Width="134"/>
+                                                    <ColumnDefinition Width="148"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <!-- Selection Checkbox -->
+                                                <CheckBox Grid.Column="0" Style="{StaticResource RowSelectCheckBox}"
+                                                          IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
+
+                                                <!-- Compact 26x26 Category Badge -->
+                                                <Border Grid.Column="1" Width="26" Height="26" CornerRadius="7" VerticalAlignment="Center" HorizontalAlignment="Left">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border">
+                                                            <Setter Property="Background" Value="{DynamicResource CatDocBg}"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding CategoryKey}" Value="Video">
+                                                                    <Setter Property="Background" Value="{DynamicResource CatVideoBg}"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding CategoryKey}" Value="Music">
+                                                                    <Setter Property="Background" Value="{DynamicResource CatMusicBg}"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding CategoryKey}" Value="Compressed">
+                                                                    <Setter Property="Background" Value="{DynamicResource CatArchiveBg}"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding CategoryKey}" Value="Programs">
+                                                                    <Setter Property="Background" Value="{DynamicResource CatProgramBg}"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding CategoryKey}" Value="Images">
+                                                                    <Setter Property="Background" Value="{DynamicResource CatImageBg}"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Border.Style>
+                                                    <TextBlock FontSize="12.5" HorizontalAlignment="Center">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock" BasedOn="{StaticResource IconText}">
+                                                                <Setter Property="Text" Value="&#xE8A5;"/>
+                                                                <Setter Property="Foreground" Value="{DynamicResource CatDocFg}"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding CategoryKey}" Value="Video">
+                                                                        <Setter Property="Text" Value="&#xE714;"/>
+                                                                        <Setter Property="Foreground" Value="{DynamicResource CatVideoFg}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding CategoryKey}" Value="Music">
+                                                                        <Setter Property="Text" Value="&#xEC4F;"/>
+                                                                        <Setter Property="Foreground" Value="{DynamicResource CatMusicFg}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding CategoryKey}" Value="Compressed">
+                                                                        <Setter Property="Text" Value="&#xF012;"/>
+                                                                        <Setter Property="Foreground" Value="{DynamicResource CatArchiveFg}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding CategoryKey}" Value="Programs">
+                                                                        <Setter Property="Text" Value="&#xE756;"/>
+                                                                        <Setter Property="Foreground" Value="{DynamicResource CatProgramFg}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding CategoryKey}" Value="Images">
+                                                                        <Setter Property="Text" Value="&#xEB9F;"/>
+                                                                        <Setter Property="Foreground" Value="{DynamicResource CatImageFg}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding CategoryKey}" Value="General">
+                                                                        <Setter Property="Text" Value="&#xE896;"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Border>
+
+                                                <!-- File Name (+ subtle inline error icon if failed) -->
+                                                <Grid Grid.Column="2" Margin="2,0,10,0" VerticalAlignment="Center">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" Text="{Binding FileName}" FontWeight="SemiBold" FontSize="12.5"
+                                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding FileName}" VerticalAlignment="Center"/>
+                                                    <TextBlock Grid.Column="1" Style="{StaticResource IconText}" Text="&#xE783;" FontSize="12"
+                                                               Foreground="{DynamicResource DangerBrush}" Margin="6,0,0,0"
+                                                               ToolTip="{Binding ErrorMessage}"
+                                                               Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
+                                                </Grid>
+
+                                                <!-- Size / Downloaded -->
+                                                <TextBlock Grid.Column="3" Text="{Binding CompactSizeText}" FontSize="11.5"
+                                                           Style="{StaticResource SecondaryText}" VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+
+                                                <!-- Progress Bar + % -->
+                                                <Grid Grid.Column="4" VerticalAlignment="Center" Margin="0,0,8,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="38"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <ProgressBar Grid.Column="0" Style="{StaticResource NahrProgressBar}" Height="5"
+                                                                 Value="{Binding ProgressPercent, Mode=OneWay}"
+                                                                 IsIndeterminate="{Binding IsIndeterminate, Mode=OneWay}"
+                                                                 VerticalAlignment="Center"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding PercentText}" FontSize="11" FontWeight="SemiBold"
+                                                               HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                               Style="{StaticResource SecondaryText}"/>
+                                                </Grid>
+
+                                                <!-- Live Speed + ETA OR Status Pill -->
+                                                <Grid Grid.Column="5" VerticalAlignment="Center" Margin="0,0,6,0">
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                                                Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" FontSize="11.5"
+                                                                   Text="{Binding SpeedText}"/>
+                                                        <TextBlock Style="{StaticResource SecondaryText}" FontSize="11" Margin="6,0,0,0"
+                                                                   Text="{Binding EtaText}" VerticalAlignment="Center"/>
+                                                    </StackPanel>
+
+                                                    <Border HorizontalAlignment="Left" CornerRadius="8" Padding="8,2"
+                                                            Visibility="{Binding ShowStatusBadge, Converter={StaticResource BoolToVis}}">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="Completed">
+                                                                        <Setter Property="Background" Value="{DynamicResource SuccessSoftBrush}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="Failed">
+                                                                        <Setter Property="Background" Value="{DynamicResource DangerSoftBrush}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="Paused">
+                                                                        <Setter Property="Background" Value="{DynamicResource WarningSoftBrush}"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Border.Style>
+                                                        <TextBlock Text="{Binding StatusText}" FontSize="10.5" FontWeight="SemiBold">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="Completed">
+                                                                            <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="Failed">
+                                                                            <Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="Paused">
+                                                                            <Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="Cancelled">
+                                                                            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </Border>
+                                                </Grid>
+
+                                                <!-- Compact Row Action Buttons -->
+                                                <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Button Style="{StaticResource CompactIconButton}" Content="&#xE768;" Command="{Binding StartCommand}"
+                                                            ToolTip="{Binding PrimaryActionText}"
+                                                            Visibility="{Binding ShowStart, Converter={StaticResource BoolToVis}}"/>
+                                                    <Button Style="{StaticResource CompactIconButton}" Content="&#xE769;" Command="{Binding PauseCommand}"
+                                                            ToolTip="{Binding [act_pause], Source={StaticResource Loc}}"
+                                                            Visibility="{Binding ShowPause, Converter={StaticResource BoolToVis}}"/>
+                                                    <Button Style="{StaticResource CompactIconButton}" Content="&#xE8A7;" Command="{Binding OpenProgressWindowCommand}"
+                                                            ToolTip="{Binding [act_progress_win], Source={StaticResource Loc}}"/>
+                                                    <Button Style="{StaticResource CompactIconButton}" Content="&#xE8E5;" Command="{Binding OpenCommand}"
+                                                            ToolTip="{Binding [act_open], Source={StaticResource Loc}}"
+                                                            Visibility="{Binding CanOpen, Converter={StaticResource BoolToVis}}"/>
+                                                    <Button Style="{StaticResource CompactIconButton}" Content="&#xE838;" Command="{Binding OpenFolderCommand}"
+                                                            ToolTip="{Binding [act_open_folder], Source={StaticResource Loc}}"/>
+                                                    <Button Style="{StaticResource CompactIconButton}" Content="&#xE711;" Command="{Binding CancelCommand}"
+                                                            ToolTip="{Binding [act_cancel], Source={StaticResource Loc}}"
+                                                            Visibility="{Binding CanCancel, Converter={StaticResource BoolToVis}}"/>
+                                                    <Button Style="{StaticResource CompactIconButton}" Content="&#xE74D;" Command="{Binding RemoveCommand}"
+                                                            ToolTip="{Binding [act_remove], Source={StaticResource Loc}}"/>
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <!-- ==================== B) EXPANDABLE PLAYLIST GROUP CONTAINER ==================== -->
+                                            <StackPanel Visibility="{Binding IsPlaylistGroup, Converter={StaticResource BoolToVis}}">
+                                                <!-- Playlist Header Row -->
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="28"/>
+                                                        <ColumnDefinition Width="32"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="136"/>
+                                                        <ColumnDefinition Width="138"/>
+                                                        <ColumnDefinition Width="134"/>
+                                                        <ColumnDefinition Width="148"/>
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <!-- Playlist Checkbox (selects/deselects all nested videos) -->
+                                                    <CheckBox Grid.Column="0" Style="{StaticResource RowSelectCheckBox}"
+                                                              IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
+
+                                                    <!-- Playlist Icon Badge -->
+                                                    <Border Grid.Column="1" Width="26" Height="26" CornerRadius="7"
+                                                            Background="{DynamicResource SelectedBrush}" BorderBrush="{DynamicResource AccentBrush}"
+                                                            BorderThickness="1" VerticalAlignment="Center" HorizontalAlignment="Left">
+                                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE8FD;" FontSize="12.5"
+                                                                   Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center"/>
+                                                    </Border>
+
+                                                    <!-- Clickable Expand/Collapse Playlist Title + Video Count Pill -->
+                                                    <Button Grid.Column="2" Style="{StaticResource SubtleButton}" Padding="4,2" Margin="0,0,8,0"
+                                                            HorizontalContentAlignment="Left" Command="{Binding ToggleExpandCommand}">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Style="{StaticResource IconText}" Text="{Binding ExpandGlyph}" FontSize="10"
+                                                                       Foreground="{DynamicResource AccentBrush}" Margin="0,0,7,0"/>
+                                                            <TextBlock Text="{Binding FileName}" FontWeight="Bold" FontSize="12.5"
+                                                                       MaxWidth="280" TextTrimming="CharacterEllipsis" ToolTip="{Binding FileName}"
+                                                                       VerticalAlignment="Center"/>
+                                                            <Border Background="{DynamicResource SelectedBrush}" CornerRadius="7" Padding="7,1.5" Margin="8,0,0,0">
+                                                                <TextBlock Text="{Binding PlaylistCountBadgeText}" FontSize="10.5" FontWeight="SemiBold"
+                                                                           Foreground="{DynamicResource AccentBrush}"/>
+                                                            </Border>
+                                                        </StackPanel>
+                                                    </Button>
+
+                                                    <!-- Playlist Progress Summary (e.g. "3/12 done · 145 MB") -->
+                                                    <TextBlock Grid.Column="3" Text="{Binding CompactSizeText}" FontSize="11.5" FontWeight="Medium"
+                                                               Style="{StaticResource SecondaryText}" VerticalAlignment="Center"
+                                                               TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+
+                                                    <!-- Aggregate Playlist Progress Bar + % -->
+                                                    <Grid Grid.Column="4" VerticalAlignment="Center" Margin="0,0,8,0">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="38"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <ProgressBar Grid.Column="0" Style="{StaticResource NahrProgressBar}" Height="5"
+                                                                     Value="{Binding ProgressPercent, Mode=OneWay}" VerticalAlignment="Center"/>
+                                                        <TextBlock Grid.Column="1" Text="{Binding PercentText}" FontSize="11" FontWeight="SemiBold"
+                                                                   HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource AccentBrush}"/>
+                                                    </Grid>
+
+                                                    <!-- Aggregate Speed OR Status Pill -->
+                                                    <Grid Grid.Column="5" VerticalAlignment="Center" Margin="0,0,6,0">
+                                                        <TextBlock Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" FontSize="11.5"
+                                                                   Text="{Binding SpeedText}" VerticalAlignment="Center"
+                                                                   Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVis}}"/>
+
+                                                        <Border HorizontalAlignment="Left" CornerRadius="8" Padding="8,2"
+                                                                Visibility="{Binding ShowStatusBadge, Converter={StaticResource BoolToVis}}">
+                                                            <Border.Style>
+                                                                <Style TargetType="Border">
+                                                                    <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="Completed">
+                                                                            <Setter Property="Background" Value="{DynamicResource SuccessSoftBrush}"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="Paused">
+                                                                            <Setter Property="Background" Value="{DynamicResource WarningSoftBrush}"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Border.Style>
+                                                            <TextBlock Text="{Binding StatusText}" FontSize="10.5" FontWeight="SemiBold"
+                                                                       Foreground="{DynamicResource AccentBrush}"/>
+                                                        </Border>
+                                                    </Grid>
+
+                                                    <!-- Playlist-Wide Action Buttons -->
+                                                    <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <Button Style="{StaticResource CompactIconButton}" Content="{Binding ExpandGlyph}"
+                                                                Command="{Binding ToggleExpandCommand}"/>
+                                                        <Button Style="{StaticResource CompactIconButton}" Content="&#xE768;"
+                                                                Command="{Binding StartCommand}"
+                                                                ToolTip="{Binding PrimaryActionText}"
+                                                                Visibility="{Binding ShowStart, Converter={StaticResource BoolToVis}}"/>
+                                                        <Button Style="{StaticResource CompactIconButton}" Content="&#xE769;"
+                                                                Command="{Binding PauseCommand}"
+                                                                ToolTip="{Binding [act_pause], Source={StaticResource Loc}}"
+                                                                Visibility="{Binding ShowPause, Converter={StaticResource BoolToVis}}"/>
+                                                        <Button Style="{StaticResource CompactIconButton}" Content="&#xE838;"
+                                                                Command="{Binding OpenFolderCommand}"
+                                                                ToolTip="{Binding [act_open_folder], Source={StaticResource Loc}}"/>
+                                                        <Button Style="{StaticResource CompactIconButton}" Content="&#xE711;"
+                                                                Command="{Binding CancelCommand}"
+                                                                ToolTip="{Binding [act_cancel], Source={StaticResource Loc}}"
+                                                                Visibility="{Binding CanCancel, Converter={StaticResource BoolToVis}}"/>
+                                                        <Button Style="{StaticResource CompactIconButton}" Content="&#xE74D;"
+                                                                Command="{Binding RemoveCommand}"
+                                                                ToolTip="{Binding [act_remove], Source={StaticResource Loc}}"/>
+                                                    </StackPanel>
+                                                </Grid>
+
+                                                <!-- Nested Playlist Videos Container (shown when playlist is expanded) -->
+                                                <Border Margin="28,6,2,2" Background="{DynamicResource SurfaceAltBrush}"
+                                                        BorderBrush="{DynamicResource BorderSoft}" BorderThickness="1"
+                                                        CornerRadius="7" Padding="8,4"
+                                                        Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}}">
+                                                    <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto">
+                                                        <ItemsControl ItemsSource="{Binding Children}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <Border BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,0,0,1"
+                                                                            Padding="2,4">
+                                                                        <Grid>
+                                                                            <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="26"/>
+                                                                                <ColumnDefinition Width="22"/>
+                                                                                <ColumnDefinition Width="*"/>
+                                                                                <ColumnDefinition Width="120"/>
+                                                                                <ColumnDefinition Width="122"/>
+                                                                                <ColumnDefinition Width="108"/>
+                                                                                <ColumnDefinition Width="124"/>
+                                                                            </Grid.ColumnDefinitions>
+
+                                                                            <CheckBox Grid.Column="0" Style="{StaticResource RowSelectCheckBox}"
+                                                                                      IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
+                                                                            <TextBlock Grid.Column="1" Style="{StaticResource IconText}" Text="&#xE714;"
+                                                                                       FontSize="11.5" Foreground="{DynamicResource CatVideoFg}"/>
+                                                                            <TextBlock Grid.Column="2" Text="{Binding FileName}" FontSize="12"
+                                                                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                                                       ToolTip="{Binding FileName}" Margin="0,0,8,0"/>
+                                                                            <TextBlock Grid.Column="3" Text="{Binding CompactSizeText}" FontSize="11"
+                                                                                       Style="{StaticResource SecondaryText}" VerticalAlignment="Center"
+                                                                                       TextTrimming="CharacterEllipsis"/>
+                                                                            <Grid Grid.Column="4" VerticalAlignment="Center" Margin="0,0,8,0">
+                                                                                <Grid.ColumnDefinitions>
+                                                                                    <ColumnDefinition Width="*"/>
+                                                                                    <ColumnDefinition Width="34"/>
+                                                                                </Grid.ColumnDefinitions>
+                                                                                <ProgressBar Grid.Column="0" Style="{StaticResource NahrProgressBar}" Height="4"
+                                                                                             Value="{Binding ProgressPercent, Mode=OneWay}" VerticalAlignment="Center"/>
+                                                                                <TextBlock Grid.Column="1" Text="{Binding PercentText}" FontSize="10.5"
+                                                                                           HorizontalAlignment="Right" Style="{StaticResource SecondaryText}"/>
+                                                                            </Grid>
+                                                                            <Grid Grid.Column="5" VerticalAlignment="Center">
+                                                                                <TextBlock Foreground="{DynamicResource AccentBrush}" FontSize="11" FontWeight="SemiBold"
+                                                                                           Text="{Binding SpeedText}"
+                                                                                           Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVis}}"/>
+                                                                                <TextBlock Text="{Binding StatusText}" FontSize="11" Style="{StaticResource SecondaryText}"
+                                                                                           Visibility="{Binding ShowStatusBadge, Converter={StaticResource BoolToVis}}"/>
+                                                                            </Grid>
+                                                                            <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center">
+                                                                                <Button Style="{StaticResource CompactIconButton}" Content="&#xE768;"
+                                                                                        Command="{Binding StartCommand}"
+                                                                                        Visibility="{Binding ShowStart, Converter={StaticResource BoolToVis}}"/>
+                                                                                <Button Style="{StaticResource CompactIconButton}" Content="&#xE769;"
+                                                                                        Command="{Binding PauseCommand}"
+                                                                                        Visibility="{Binding ShowPause, Converter={StaticResource BoolToVis}}"/>
+                                                                                <Button Style="{StaticResource CompactIconButton}" Content="&#xE8A7;"
+                                                                                        Command="{Binding OpenProgressWindowCommand}"/>
+                                                                                <Button Style="{StaticResource CompactIconButton}" Content="&#xE8E5;"
+                                                                                        Command="{Binding OpenCommand}"
+                                                                                        Visibility="{Binding CanOpen, Converter={StaticResource BoolToVis}}"/>
+                                                                                <Button Style="{StaticResource CompactIconButton}" Content="&#xE74D;"
+                                                                                        Command="{Binding RemoveCommand}"/>
+                                                                            </StackPanel>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </ScrollViewer>
+                                                </Border>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                            <!-- Rich Empty State Hero -->
+                            <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderSoft}"
+                                     BorderThickness="1" CornerRadius="18" Padding="48,38"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                                     Visibility="{Binding ShowEmptyState, Converter={StaticResource BoolToVis}}">
+                                <Border.Effect>
+                                    <DropShadowEffect ShadowDepth="2" BlurRadius="16" Opacity="0.06" Color="#000000"/>
+                                </Border.Effect>
+                                <StackPanel HorizontalAlignment="Center">
+                                    <Border Width="84" Height="84" CornerRadius="22" Background="{DynamicResource HeroCardBrush}"
+                                            BorderBrush="{DynamicResource BorderSoft}" BorderThickness="1"
+                                            HorizontalAlignment="Center" Margin="0,0,0,16">
+                                        <Image Source="pack://application:,,,/Assets/logo.png" Width="52" Height="52"
+                                               RenderOptions.BitmapScalingMode="HighQuality" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Style="{StaticResource TitleText}" Margin="0,0,0,6" HorizontalAlignment="Center"
+                                               Text="{Binding [empty_title], Source={StaticResource Loc}}"/>
+                                    <TextBlock Style="{StaticResource SecondaryText}" HorizontalAlignment="Center" FontSize="13.5" Margin="0,0,0,20"
+                                               Text="{Binding [empty_hint], Source={StaticResource Loc}}"/>
+                                    <Button Style="{StaticResource AccentButton}" HorizontalAlignment="Center" Command="{Binding AddUrlCommand}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource IconText}" Text="&#xE710;" Margin="0,0,8,0"/>
+                                            <TextBlock Text="{Binding [add_url], Source={StaticResource Loc}}" FontWeight="SemiBold"/>
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!-- Row 4: Toggleable Selected Item Details Drawer (only visible when Details button is toggled on) -->
+                        <Border Grid.Row="4" Margin="0,8,0,0" Padding="16,12" CornerRadius="12" BorderThickness="1"
+                                Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderSoft}"
+                                Visibility="{Binding ShowDetailsDrawer, Converter={StaticResource BoolToVis}}">
+                            <Grid DataContext="{Binding SelectedDownload}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="310"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                                    <TextBlock Text="{Binding [det_title], Source={StaticResource Loc}}" FontWeight="SemiBold" FontSize="14"/>
+                                    <TextBlock Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,6,0,0" Text="{Binding [det_url], Source={StaticResource Loc}}"/>
+                                    <TextBlock Text="{Binding Url}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding Url}"/>
+                                    <TextBlock Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,5,0,0" Text="{Binding [det_path], Source={StaticResource Loc}}"/>
+                                    <TextBlock Text="{Binding FilePath}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePath}"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                        <Border Background="{DynamicResource HoverBrush}" CornerRadius="7" Padding="10,4" Margin="0,0,8,0">
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource SecondaryText}" FontSize="10" Text="{Binding [det_size], Source={StaticResource Loc}}"/>
+                                                <TextBlock Text="{Binding SizeText}" FontSize="12" FontWeight="SemiBold"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Background="{DynamicResource HoverBrush}" CornerRadius="7" Padding="10,4" Margin="0,0,8,0">
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource SecondaryText}" FontSize="10" Text="{Binding [det_connections], Source={StaticResource Loc}}"/>
+                                                <TextBlock Text="{Binding Connections}" FontSize="12" FontWeight="SemiBold"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Background="{DynamicResource HoverBrush}" CornerRadius="7" Padding="10,4">
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource SecondaryText}" FontSize="10" Text="{Binding [det_ranges], Source={StaticResource Loc}}"/>
+                                                <TextBlock Text="{Binding RangesText}" FontSize="12" FontWeight="SemiBold"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{Binding [det_segments], Source={StaticResource Loc}}" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
+                                    <ScrollViewer MaxHeight="100" VerticalScrollBarVisibility="Auto">
+                                        <ItemsControl ItemsSource="{Binding Segments}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid Margin="0,0,0,4">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="24"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Style="{StaticResource SecondaryText}" FontSize="11" Text="{Binding Index}"/>
+                                                        <ProgressBar Grid.Column="1" Style="{StaticResource NahrProgressBar}" Height="4"
+                                                                     Value="{Binding Percent, Mode=OneWay}" VerticalAlignment="Center"/>
+                                                        <TextBlock Grid.Column="2" Style="{StaticResource SecondaryText}" FontSize="11" Margin="8,0,0,0"
+                                                                   Text="{Binding DownloadedText}"/>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Row 5: Subtle Status Message Footer -->
+                        <TextBlock Grid.Row="5" Margin="4,6,4,0" Style="{StaticResource SecondaryText}" FontSize="11.5"
+                                   TextTrimming="CharacterEllipsis" Text="{Binding StatusMessage}"/>
+                    </Grid>
+
+                    <!-- ============================ Settings Page (Fluent Cards) ============================ -->
+                    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto"
+                                  Visibility="{Binding IsSettingsPage, Converter={StaticResource BoolToVis}}">
+                        <StackPanel DataContext="{Binding SettingsPage}" MaxWidth="660" Margin="32,26" HorizontalAlignment="Left">
+                            <TextBlock Style="{StaticResource TitleText}" FontSize="24" Margin="0,0,0,20"
+                                       Text="{Binding [set_title], Source={StaticResource Loc}}"/>
+
+                            <!-- Card 1: Appearance & Folder -->
+                            <Border Background="{DynamicResource SurfaceBrush}" CornerRadius="14" BorderBrush="{DynamicResource BorderSoft}"
+                                    BorderThickness="1" Padding="24,20" Margin="0,0,0,16">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock FontWeight="SemiBold" Text="{Binding [set_language], Source={StaticResource Loc}}"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <RadioButton GroupName="lang" IsChecked="{Binding IsEnglish, Mode=TwoWay}" Content="English"/>
+                                            <RadioButton GroupName="lang" IsChecked="{Binding IsArabic, Mode=TwoWay}" Content="العربية" Margin="0"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <Border Height="1" Background="{DynamicResource BorderSoft}" Margin="0,0,0,16"/>
+
+                                    <Grid Margin="0,0,0,16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock FontWeight="SemiBold" Text="{Binding [set_theme], Source={StaticResource Loc}}"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <RadioButton GroupName="theme" IsChecked="{Binding IsLightTheme, Mode=TwoWay}" Content="{Binding [theme_light], Source={StaticResource Loc}}"/>
+                                            <RadioButton GroupName="theme" IsChecked="{Binding IsDarkTheme, Mode=TwoWay}" Content="{Binding [theme_dark], Source={StaticResource Loc}}" Margin="0"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <Border Height="1" Background="{DynamicResource BorderSoft}" Margin="0,0,0,16"/>
+
+                                    <TextBlock FontWeight="SemiBold" Margin="0,0,0,8" Text="{Binding [set_folder], Source={StaticResource Loc}}"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Style="{StaticResource NahrTextBox}" Text="{Binding DownloadDirectory, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <Button Grid.Column="1" Style="{StaticResource SubtleButton}" Margin="8,0,0,0" Command="{Binding BrowseCommand}"
+                                                Content="{Binding [add_browse], Source={StaticResource Loc}}"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card 2: Global Connections & Performance -->
+                            <Border Background="{DynamicResource SurfaceBrush}" CornerRadius="14" BorderBrush="{DynamicResource BorderSoft}"
+                                    BorderThickness="1" Padding="24,20" Margin="0,0,0,16">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock FontWeight="SemiBold" VerticalAlignment="Center"
+                                                   Text="{Binding [set_connections], Source={StaticResource Loc}}"/>
+                                        <Border Grid.Column="1" Background="{DynamicResource SelectedBrush}" CornerRadius="8" Padding="12,3">
+                                            <TextBlock Text="{Binding Connections}" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}"/>
+                                        </Border>
+                                    </Grid>
+                                    <Slider Minimum="1" Maximum="32" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Value="{Binding Connections, Mode=TwoWay}" Margin="0,0,0,18"/>
+
+                                    <Border Height="1" Background="{DynamicResource BorderSoft}" Margin="0,0,0,16"/>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock FontWeight="SemiBold" VerticalAlignment="Center"
+                                                   Text="{Binding [set_max_downloads], Source={StaticResource Loc}}"/>
+                                        <Border Grid.Column="1" Background="{DynamicResource SelectedBrush}" CornerRadius="8" Padding="12,3">
+                                            <TextBlock Text="{Binding MaxConcurrentDownloads}" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}"/>
+                                        </Border>
+                                    </Grid>
+                                    <Slider Minimum="1" Maximum="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Value="{Binding MaxConcurrentDownloads, Mode=TwoWay}" Margin="0,0,0,18"/>
+
+                                    <Border Height="1" Background="{DynamicResource BorderSoft}" Margin="0,0,0,16"/>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="150"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock FontWeight="SemiBold" VerticalAlignment="Center"
+                                                   Text="{Binding [set_speed_limit], Source={StaticResource Loc}}"/>
+                                        <TextBox Grid.Column="1" Style="{StaticResource NahrTextBox}"
+                                                 Text="{Binding SpeedLimitKBps, UpdateSourceTrigger=PropertyChanged}"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card 3: Behaviour Toggles -->
+                            <Border Background="{DynamicResource SurfaceBrush}" CornerRadius="14" BorderBrush="{DynamicResource BorderSoft}"
+                                    BorderThickness="1" Padding="24,20" Margin="0,0,0,18">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource LabelText}" Margin="0,0,0,14" Text="{Binding [set_behavior], Source={StaticResource Loc}}"/>
+
+                                    <CheckBox Margin="0,0,0,14" IsChecked="{Binding ShowDownloadWindowBool, Mode=TwoWay}"
+                                              Content="{Binding [set_show_dl_window], Source={StaticResource Loc}}"/>
+                                    <CheckBox Margin="0,0,0,14" IsChecked="{Binding StartWithWindowsBool, Mode=TwoWay}"
+                                              Content="{Binding [set_start_with_windows], Source={StaticResource Loc}}"/>
+                                    <CheckBox Margin="0,0,0,14" IsChecked="{Binding AutoResumeBool, Mode=TwoWay}"
+                                              Content="{Binding [set_auto_resume], Source={StaticResource Loc}}"/>
+                                    <CheckBox Margin="0,0,0,14" IsChecked="{Binding MonitorClipboardBool, Mode=TwoWay}"
+                                              Content="{Binding [set_monitor_clipboard], Source={StaticResource Loc}}"/>
+                                    <CheckBox Margin="0,0,0,14" IsChecked="{Binding MinimizeToTrayBool, Mode=TwoWay}"
+                                              Content="{Binding [set_minimize_tray], Source={StaticResource Loc}}"/>
+                                    <CheckBox Margin="0,0,0,14" IsChecked="{Binding CloseToTrayBool, Mode=TwoWay}"
+                                              Content="{Binding [set_close_tray], Source={StaticResource Loc}}"/>
+                                    <CheckBox Margin="0,0,0,16" IsChecked="{Binding ShowNotificationsBool, Mode=TwoWay}"
+                                              Content="{Binding [set_notifications], Source={StaticResource Loc}}"/>
+
+                                    <Border Height="1" Background="{DynamicResource BorderSoft}" Margin="0,0,0,16"/>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock FontWeight="SemiBold" VerticalAlignment="Center"
+                                                   Text="{Binding [set_default_priority], Source={StaticResource Loc}}"/>
+                                        <Border Grid.Column="1" Background="{DynamicResource SelectedBrush}" CornerRadius="8" Padding="12,3">
+                                            <TextBlock Text="{Binding DefaultPriority}" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}"/>
+                                        </Border>
+                                    </Grid>
+                                    <Slider Minimum="-100" Maximum="200" TickFrequency="10" IsSnapToTickEnabled="True"
+                                            Value="{Binding DefaultPriority, Mode=TwoWay}"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Save Bar -->
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,24">
+                                <Button Style="{StaticResource AccentButton}" Padding="26,10" Command="{Binding SaveCommand}"
+                                        Content="{Binding [set_save], Source={StaticResource Loc}}"/>
+                                <TextBlock Margin="16,0,0,0" VerticalAlignment="Center" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource SuccessBrush}" Text="{Binding Message}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+            <!-- ============================ Add URL Modal Overlay ============================ -->
+            <Grid Background="{DynamicResource OverlayBrush}"
+                  Visibility="{Binding IsAddDialogOpen, Converter={StaticResource BoolToVis}}">
+                <Border DataContext="{Binding AddDialog}" Width="560" Padding="28" CornerRadius="18" BorderThickness="1"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderSoft}">
+                    <Border.Effect>
+                        <DropShadowEffect ShadowDepth="6" BlurRadius="28" Opacity="0.25" Color="#000000"/>
+                    </Border.Effect>
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                            <Image Source="pack://application:,,,/Assets/logo.png" Width="28" Height="28"
+                                   RenderOptions.BitmapScalingMode="HighQuality" Margin="0,0,10,0"/>
+                            <TextBlock Style="{StaticResource TitleText}" VerticalAlignment="Center"
+                                       Text="{Binding [add_title], Source={StaticResource Loc}}"/>
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource SecondaryText}" Margin="0,0,0,10"
+                                   Text="{Binding [add_urls_hint], Source={StaticResource Loc}}"/>
+
+                        <TextBox Style="{StaticResource NahrTextBox}" Height="120" AcceptsReturn="True" TextWrapping="NoWrap"
+                                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                 Text="{Binding UrlsText, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock FontWeight="SemiBold" Margin="0,16,0,6" Text="{Binding [add_folder], Source={StaticResource Loc}}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Style="{StaticResource NahrTextBox}" Text="{Binding DestinationDirectory, UpdateSourceTrigger=PropertyChanged}"/>
+                            <Button Grid.Column="1" Style="{StaticResource SubtleButton}" Margin="8,0,0,0" Command="{Binding BrowseCommand}"
+                                    Content="{Binding [add_browse], Source={StaticResource Loc}}"/>
+                        </Grid>
+
+                        <StackPanel Margin="0,16,0,0"
+                                    Visibility="{Binding HasYouTubeUrl, Converter={StaticResource BoolToVis}}">
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock FontWeight="SemiBold" VerticalAlignment="Center"
+                                           Text="{Binding [dl_mode_label], Source={StaticResource Loc}}"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                    <RadioButton IsChecked="{Binding IsVideoMode, Mode=TwoWay}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource IconText}" Text="&#xE714;" FontSize="13" Margin="0,0,7,0"/>
+                                            <TextBlock Text="{Binding [dl_mode_video], Source={StaticResource Loc}}"/>
+                                        </StackPanel>
+                                    </RadioButton>
+                                    <RadioButton IsChecked="{Binding IsAudioMode, Mode=TwoWay}" Margin="0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource IconText}" Text="&#xEC4F;" FontSize="13" Margin="0,0,7,0"/>
+                                            <TextBlock Text="{Binding [dl_mode_audio], Source={StaticResource Loc}}"/>
+                                        </StackPanel>
+                                    </RadioButton>
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock FontWeight="SemiBold" Text="{Binding [yt_quality], Source={StaticResource Loc}}"/>
+                                <TextBlock Grid.Column="1" FontSize="11" Foreground="{DynamicResource AccentBrush}"
+                                           Text="{Binding [yt_extracting], Source={StaticResource Loc}}"
+                                           Visibility="{Binding IsFetchingFormats, Converter={StaticResource BoolToVis}}"/>
+                            </Grid>
+                            <ComboBox Style="{StaticResource NahrComboBox}"
+                                      ItemsSource="{Binding Qualities}"
+                                      SelectedItem="{Binding SelectedQuality, Mode=TwoWay}"
+                                      DisplayMemberPath="Label"/>
+                        </StackPanel>
+
+                        <CheckBox Style="{StaticResource RowSelectCheckBox}" Margin="0,16,0,0"
+                                  IsChecked="{Binding StartImmediately, Mode=TwoWay}"
+                                  Content="{Binding [add_start_now], Source={StaticResource Loc}}"/>
+
+                        <TextBlock Margin="0,12,0,0" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}" Text="{Binding Message}"
+                                   Visibility="{Binding HasMessage, Converter={StaticResource BoolToVis}}"/>
+
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0">
+                            <Button Style="{StaticResource SubtleButton}" Command="{Binding CancelCommand}"
+                                    Content="{Binding [btn_cancel], Source={StaticResource Loc}}"/>
+                            <Button Style="{StaticResource AccentButton}" Margin="10,0,0,0" Command="{Binding ConfirmCommand}"
+                                    Content="{Binding [add_confirm], Source={StaticResource Loc}}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
+    </Grid>
+</Window>

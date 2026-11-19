@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>DownloadManager.Engine</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DownloadManager.Core\DownloadManager.Core.csproj" />
+    <!-- Microsoft.Extensions.Logging.Abstractions comes from the shared framework here (NuGet is unreachable
+         in this build environment). On a machine with NuGet access this can be swapped for a
+         PackageReference to Microsoft.Extensions.Logging.Abstractions (see ARCHITECTURE.md, ADR-004). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="DownloadManager.Verification" />
+  </ItemGroup>
+</Project>

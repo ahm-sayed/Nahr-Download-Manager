@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>DownloadManager.App</RootNamespace>
+    <AssemblyName>Nahr</AssemblyName>
+    <ApplicationIcon>Assets\nahr.ico</ApplicationIcon>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\nahr.ico" />
+    <Resource Include="Assets\logo.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DownloadManager.Core\DownloadManager.Core.csproj" />
+    <ProjectReference Include="..\DownloadManager.Engine\DownloadManager.Engine.csproj" />
+    <ProjectReference Include="..\DownloadManager.Data\DownloadManager.Data.csproj" />
+    <ProjectReference Include="..\DownloadManager.Infrastructure\DownloadManager.Infrastructure.csproj" />
+    <ProjectReference Include="..\DownloadManager.Presentation\DownloadManager.Presentation.csproj" />
+  </ItemGroup>
+</Project>

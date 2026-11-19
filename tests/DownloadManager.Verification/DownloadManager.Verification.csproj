@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>DownloadManager.Verification</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DownloadManager.Core\DownloadManager.Core.csproj" />
+    <ProjectReference Include="..\..\src\DownloadManager.Engine\DownloadManager.Engine.csproj" />
+    <ProjectReference Include="..\..\src\DownloadManager.Data\DownloadManager.Data.csproj" />
+    <ProjectReference Include="..\..\src\DownloadManager.Presentation\DownloadManager.Presentation.csproj" />
+    <ProjectReference Include="..\..\src\DownloadManager.Infrastructure\DownloadManager.Infrastructure.csproj" />
+    <ProjectReference Include="..\DownloadManager.TestServer\DownloadManager.TestServer.csproj" />
+  </ItemGroup>
+</Project>

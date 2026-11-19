@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html dir="ltr" lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 315px;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      font-size: 13px;
+      color: #0f172a;
+      background: #ffffff;
+      padding: 15px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .title { font-size: 16px; font-weight: 700; }
+    .subtitle { font-size: 11px; color: #64748b; }
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 12px;
+      border-radius: 9px;
+      background: #f1f5f9;
+      margin-bottom: 10px;
+      font-weight: 500;
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 8px;
+    }
+    .dot-ok { background: #10b981; }
+    .dot-err { background: #ef4444; }
+    .dot-off { background: #94a3b8; }
+    .btn {
+      padding: 8.5px 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: filter 0.15s, background 0.15s;
+      margin-bottom: 8px;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      color: #fff;
+    }
+    .btn-primary:hover { filter: brightness(1.08); }
+    .btn-secondary {
+      background: #e2e8f0;
+      color: #334155;
+    }
+    .btn-secondary:hover { background: #cbd5e1; }
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .btn-row .btn {
+      margin-bottom: 0;
+      flex: 1;
+    }
+    .btn-audio {
+      background: linear-gradient(135deg, #0d9488, #14b8a6);
+      color: #fff;
+    }
+    .btn-audio:hover { filter: brightness(1.08); }
+    .quality-list {
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 175px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+      padding: 6px;
+      border-radius: 9px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+    }
+    .quality-hdr {
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #64748b;
+      padding: 2px 4px 4px;
+    }
+    .q-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #0f172a;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: left;
+    }
+    .q-btn:hover {
+      background: #eff6ff;
+      border-color: #3b82f6;
+      color: #1d4ed8;
+    }
+    .q-badge {
+      padding: 1.5px 6px;
+      border-radius: 4px;
+      background: #dbeafe;
+      color: #1d4ed8;
+      font-size: 10.5px;
+      font-weight: 700;
+    }
+    .hint {
+      margin-top: 4px;
+      text-align: center;
+      color: #64748b;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="icons/icon128.png" width="36" height="36" alt="Nahr" style="border-radius:10px;" />
+    <div>
+      <div class="title">Nahr</div>
+      <div class="subtitle">Download &amp; Media Manager</div>
+    </div>
+  </div>
+
+  <div class="status-row">
+    <div>
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Checking…</span>
+    </div>
+  </div>
+
+  <div class="quality-list" id="qualityList"></div>
+
+  <div class="btn-row" id="grabRow" style="display:none;">
+    <button class="btn btn-primary" id="grabMediaBtn">⬇ Video</button>
+    <button class="btn btn-audio" id="grabAudioBtn">♪ Audio (MP3)</button>
+  </div>
+  <button class="btn btn-secondary" id="toggleBtn">Loading…</button>
+
+  <div class="hint">Click the floating Nahr bar on any video to pick exact resolution or MP3 quality.</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
