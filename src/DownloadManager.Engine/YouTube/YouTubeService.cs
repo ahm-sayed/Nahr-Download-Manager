@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -9,8 +11,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace DownloadManager.Engine.YouTube;
 
 /// <summary>
-/// Wraps yt-dlp (and optional ffmpeg for high-res DASH audio muxing) to extract YouTube video metadata and direct stream URLs
-/// in a single fast invocation so <see cref="DownloadEngine"/> can download them with multi-segment acceleration.
+/// Extracts YouTube video &amp; playlist metadata and direct CDN stream URLs using a fast built-in C#
+/// InnerTube client (immune to Windows Application Control blocking unsigned external tools), with
+/// optional yt-dlp fallback for non-YouTube sites and ffmpeg for lossless high-res DASH audio muxing.
 /// </summary>
 public sealed class YouTubeService
 {
@@ -23,10 +26,22 @@ public sealed class YouTubeService
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly HttpClient AudioHttp = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private static readonly HttpClient ApiHttp = new() { Timeout = TimeSpan.FromSeconds(25) };
+
+    private static readonly (string Name, string Version, string UserAgent)[] InnerTubePlayerClients =
+    [
+        ("ANDROID_VR", "1.65.10", "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"),
+        ("IOS", "20.10.4", "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"),
+        ("ANDROID", "20.10.38", "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip"),
+    ];
+
+    private const string WebBrowseClientVersion = "2.20261119.01.00";
+    private const string WebUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
     private readonly string? _ytDlpPath;
     private readonly string? _ffmpegPath;
     private readonly ILogger _log;
+    private volatile bool _ytDlpBlocked;
 
     public YouTubeService(ILogger? logger = null)
     {
@@ -35,8 +50,11 @@ public sealed class YouTubeService
         _ffmpegPath = FindExecutable("ffmpeg.exe");
     }
 
-    /// <summary>Whether yt-dlp was found on this machine.</summary>
+    /// <summary>Whether yt-dlp was found on this machine (for non-YouTube sites; YouTube works natively without yt-dlp).</summary>
     public bool IsAvailable => _ytDlpPath is not null;
+
+    /// <summary>Whether yt-dlp can be executed (present and not blocked by Windows Application Control).</summary>
+    public bool CanRunYtDlp => _ytDlpPath is not null && !_ytDlpBlocked;
 
     /// <summary>Whether ffmpeg was found (enables lossless video+audio muxing for 720p/1080p/4K DASH streams).</summary>
     public bool HasFfmpeg => _ffmpegPath is not null;
@@ -71,14 +89,37 @@ public sealed class YouTubeService
 
     // ------------------------------------------------------------------ video info
 
-    /// <summary>Gets metadata, clean quality options, and direct CDN URLs in ONE yt-dlp call.</summary>
+    /// <summary>Gets metadata, clean quality options, and direct CDN URLs (native InnerTube first for YouTube, yt-dlp fallback).</summary>
     public async Task<YouTubeVideoInfo> GetVideoInfoAsync(string url, CancellationToken ct = default)
     {
-        EnsureAvailable();
+        Exception? nativeError = null;
+        if (IsYouTubeUrl(url) && ExtractVideoId(url) is { } videoId)
+        {
+            try
+            {
+                var nativeInfo = await GetVideoInfoNativeAsync(videoId, url, ct).ConfigureAwait(false);
+                if (nativeInfo.Formats.Count > 0) return nativeInfo;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                nativeError = ex;
+                _log.LogWarning("Native YouTube video extraction failed for {Id}: {Error}", videoId, ex.Message);
+            }
+        }
 
-        var json = await RunProcessAsync(_ytDlpPath!, ["-J", "--no-playlist", "--no-warnings", "--no-download", url], ct).ConfigureAwait(false);
-        using var doc = JsonDocument.Parse(json);
-        return ParseVideoInfo(doc.RootElement, url);
+        if (CanRunYtDlp)
+        {
+            var json = await RunProcessAsync(_ytDlpPath!, ["-J", "--no-playlist", "--no-warnings", "--no-download", url], ct).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(json);
+            return ParseVideoInfo(doc.RootElement, url);
+        }
+
+        if (nativeError is not null)
+            throw new YouTubeException(nativeError.Message);
+
+        EnsureAvailable();
+        throw new YouTubeException("Could not extract video info.");
     }
 
     /// <summary>
@@ -233,10 +274,31 @@ public sealed class YouTubeService
 
     // ------------------------------------------------------------------ playlist info
 
-    /// <summary>Gets metadata for all videos in a playlist (flat listing — fast).</summary>
+    /// <summary>Gets metadata for all videos in a playlist (native YouTube InnerTube browse first, yt-dlp fallback).</summary>
     public async Task<YouTubePlaylistInfo> GetPlaylistInfoAsync(string url, CancellationToken ct = default)
     {
-        EnsureAvailable();
+        Exception? nativeError = null;
+        if (IsYouTubeUrl(url) && ExtractPlaylistId(url) is { } plId)
+        {
+            try
+            {
+                var nativePlaylist = await GetPlaylistInfoNativeAsync(plId, ct).ConfigureAwait(false);
+                if (nativePlaylist.Entries.Count > 0) return nativePlaylist;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                nativeError = ex;
+                _log.LogWarning("Native YouTube playlist extraction failed for {Id}: {Error}", plId, ex.Message);
+            }
+        }
+
+        if (!CanRunYtDlp)
+        {
+            if (nativeError is not null) throw new YouTubeException(nativeError.Message);
+            throw new YouTubeException("No videos were found in this YouTube playlist (it may be private, empty, or unavailable).");
+        }
+
         var json = await RunProcessAsync(_ytDlpPath!, ["--flat-playlist", "-J", "--no-warnings", "--no-download", url], ct).ConfigureAwait(false);
 
         var lines = json.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -310,6 +372,413 @@ public sealed class YouTubeService
         };
     }
 
+    // ------------------------------------------------------------------ built-in pure-C# YouTube InnerTube extractor
+
+    private async Task<YouTubePlaylistInfo> GetPlaylistInfoNativeAsync(string playlistId, CancellationToken ct)
+    {
+        var entries = new List<YouTubePlaylistEntry>();
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        string? title = null;
+        string? uploader = null;
+        string? continuation = null;
+
+        // Fetch initial page + up to 9 continuation pages (~1000 videos max)
+        for (var page = 0; page < 10; page++)
+        {
+            object payload = continuation is null
+                ? new
+                {
+                    browseId = playlistId.StartsWith("VL", StringComparison.OrdinalIgnoreCase) ? playlistId : "VL" + playlistId,
+                    context = new
+                    {
+                        client = new
+                        {
+                            clientName = "WEB",
+                            clientVersion = WebBrowseClientVersion,
+                            hl = "en",
+                            gl = "US",
+                        }
+                    }
+                }
+                : new
+                {
+                    continuation,
+                    context = new
+                    {
+                        client = new
+                        {
+                            clientName = "WEB",
+                            clientVersion = WebBrowseClientVersion,
+                            hl = "en",
+                            gl = "US",
+                        }
+                    }
+                };
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, "https://www.youtube.com/youtubei/v1/browse?prettyPrint=false")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+            };
+            req.Headers.TryAddWithoutValidation("User-Agent", WebUserAgent);
+            req.Headers.TryAddWithoutValidation("Accept-Language", "en-US,en;q=0.9");
+
+            using var resp = await ApiHttp.SendAsync(req, ct).ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+            var parsed = ParseNativePlaylistBrowseJson(body, playlistId);
+            title ??= parsed.Title;
+            uploader ??= parsed.Uploader;
+
+            var addedThisPage = 0;
+            foreach (var entry in parsed.Entries)
+            {
+                if (seenIds.Add(entry.VideoId))
+                {
+                    entries.Add(entry);
+                    addedThisPage++;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(parsed.ContinuationToken) || addedThisPage == 0)
+                break;
+
+            continuation = parsed.ContinuationToken;
+        }
+
+        return new YouTubePlaylistInfo
+        {
+            Id = playlistId,
+            Title = string.IsNullOrWhiteSpace(title) ? "YouTube Playlist" : title!,
+            Uploader = uploader,
+            Entries = entries,
+        };
+    }
+
+    /// <summary>Parses a YouTube InnerTube `/youtubei/v1/browse` JSON response (supports both 2026 lockupViewModel and playlistVideoRenderer).</summary>
+    internal static (string? Title, string? Uploader, List<YouTubePlaylistEntry> Entries, string? ContinuationToken)
+        ParseNativePlaylistBrowseJson(string json, string playlistId)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        string? title = null;
+        string? uploader = null;
+        if (root.TryGetProperty("metadata", out var meta)
+            && meta.TryGetProperty("playlistMetadataRenderer", out var pmr))
+        {
+            title = GetString(pmr, "title");
+        }
+
+        var entries = new List<YouTubePlaylistEntry>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        string? continuationToken = null;
+
+        void Walk(JsonElement el)
+        {
+            if (el.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in el.EnumerateArray()) Walk(item);
+                return;
+            }
+            if (el.ValueKind != JsonValueKind.Object) return;
+
+            foreach (var prop in el.EnumerateObject())
+            {
+                if (prop.Name == "playlistVideoRenderer" && prop.Value.ValueKind == JsonValueKind.Object)
+                {
+                    var v = prop.Value;
+                    var vid = GetString(v, "videoId");
+                    if (!string.IsNullOrWhiteSpace(vid) && seen.Add(vid!))
+                    {
+                        var vTitle = ReadTextFromRunsOrSimple(v, "title") ?? vid!;
+                        TimeSpan? dur = null;
+                        if (GetString(v, "lengthSeconds") is { } ls && double.TryParse(ls, NumberStyles.Float, CultureInfo.InvariantCulture, out var secs) && secs > 0)
+                            dur = TimeSpan.FromSeconds(secs);
+                        else
+                            dur = ParseDurationText(ReadTextFromRunsOrSimple(v, "lengthText"));
+
+                        entries.Add(new YouTubePlaylistEntry(vid!, vTitle, $"https://www.youtube.com/watch?v={vid}", dur));
+                    }
+                    continue;
+                }
+
+                if (prop.Name == "lockupViewModel" && prop.Value.ValueKind == JsonValueKind.Object)
+                {
+                    var lm = prop.Value;
+                    var vid = GetString(lm, "contentId");
+                    if (!string.IsNullOrWhiteSpace(vid) && vid!.Length == 11 && seen.Add(vid))
+                    {
+                        string? vTitle = null;
+                        if (lm.TryGetProperty("metadata", out var lmMeta)
+                            && lmMeta.TryGetProperty("lockupMetadataViewModel", out var lmvm)
+                            && lmvm.TryGetProperty("title", out var tEl))
+                        {
+                            vTitle = GetString(tEl, "content");
+                        }
+                        var dur = ExtractLockupDuration(lm);
+                        entries.Add(new YouTubePlaylistEntry(vid, string.IsNullOrWhiteSpace(vTitle) ? vid : vTitle!, $"https://www.youtube.com/watch?v={vid}", dur));
+                    }
+                    continue;
+                }
+
+                if (prop.Name == "pageHeaderViewModel" && title is null && prop.Value.ValueKind == JsonValueKind.Object)
+                {
+                    if (prop.Value.TryGetProperty("title", out var phTitle)
+                        && phTitle.TryGetProperty("dynamicTextViewModel", out var dtvm)
+                        && dtvm.TryGetProperty("text", out var txt))
+                    {
+                        title = GetString(txt, "content");
+                    }
+                }
+
+                if (prop.Name == "continuationCommand" && continuationToken is null && prop.Value.ValueKind == JsonValueKind.Object)
+                {
+                    var tok = GetString(prop.Value, "token");
+                    if (!string.IsNullOrWhiteSpace(tok)) continuationToken = tok;
+                }
+
+                if (prop.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                    Walk(prop.Value);
+            }
+        }
+
+        Walk(root);
+        return (title, uploader, entries, continuationToken);
+    }
+
+    private async Task<YouTubeVideoInfo> GetVideoInfoNativeAsync(string videoId, string originalUrl, CancellationToken ct)
+    {
+        string? lastReason = null;
+
+        foreach (var client in InnerTubePlayerClients)
+        {
+            var payload = new
+            {
+                videoId,
+                contentCheckOk = true,
+                racyCheckOk = true,
+                context = new
+                {
+                    client = new
+                    {
+                        clientName = client.Name,
+                        clientVersion = client.Version,
+                        hl = "en",
+                        gl = "US",
+                    }
+                }
+            };
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, "https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+            };
+            req.Headers.TryAddWithoutValidation("User-Agent", client.UserAgent);
+            req.Headers.TryAddWithoutValidation("Accept-Language", "en-US,en;q=0.9");
+
+            using var resp = await ApiHttp.SendAsync(req, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) continue;
+
+            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var parsed = ParseNativePlayerJson(body, originalUrl, client.UserAgent, HasFfmpeg, out var reason);
+            if (parsed is not null && parsed.Formats.Count > 0)
+                return parsed;
+
+            if (!string.IsNullOrWhiteSpace(reason)) lastReason = reason;
+        }
+
+        throw new YouTubeException(lastReason ?? "Could not extract playable formats for this YouTube video.");
+    }
+
+    /// <summary>Parses a YouTube InnerTube `/youtubei/v1/player` JSON response into a <see cref="YouTubeVideoInfo"/>.</summary>
+    internal static YouTubeVideoInfo? ParseNativePlayerJson(string json, string originalUrl, string userAgent, bool hasFfmpeg, out string? errorReason)
+    {
+        errorReason = null;
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        if (root.TryGetProperty("playabilityStatus", out var ps))
+        {
+            var status = GetString(ps, "status");
+            if (!string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase))
+            {
+                errorReason = GetString(ps, "reason") ?? status;
+                return null;
+            }
+        }
+
+        string id = ExtractVideoId(originalUrl) ?? "";
+        string title = "Unknown";
+        string? uploader = null;
+        TimeSpan? duration = null;
+        string? thumbnail = null;
+
+        if (root.TryGetProperty("videoDetails", out var vd))
+        {
+            id = GetString(vd, "videoId") ?? id;
+            title = GetString(vd, "title") ?? title;
+            uploader = GetString(vd, "author");
+            if (GetString(vd, "lengthSeconds") is { } ls && double.TryParse(ls, NumberStyles.Float, CultureInfo.InvariantCulture, out var secs) && secs > 0)
+                duration = TimeSpan.FromSeconds(secs);
+            if (vd.TryGetProperty("thumbnail", out var th)
+                && th.TryGetProperty("thumbnails", out var thArr)
+                && thArr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var t in thArr.EnumerateArray())
+                    thumbnail = GetString(t, "url") ?? thumbnail;
+            }
+        }
+
+        var rawFormats = new List<YouTubeFormat>();
+        if (root.TryGetProperty("streamingData", out var sd))
+        {
+            void AddArray(string propName)
+            {
+                if (!sd.TryGetProperty(propName, out var arr) || arr.ValueKind != JsonValueKind.Array) return;
+                foreach (var f in arr.EnumerateArray())
+                {
+                    var directUrl = GetString(f, "url");
+                    if (string.IsNullOrWhiteSpace(directUrl) || !directUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    var itag = f.TryGetProperty("itag", out var itEl) && itEl.ValueKind == JsonValueKind.Number
+                        ? itEl.GetInt32().ToString(CultureInfo.InvariantCulture)
+                        : "unknown";
+                    var mime = GetString(f, "mimeType") ?? "";
+                    var (ext, vcodec, acodec, hasVideo, hasAudio) = ParseMimeType(mime);
+                    if (!hasVideo && !hasAudio) continue;
+
+                    long? filesize = null;
+                    if (GetString(f, "contentLength") is { } clStr && long.TryParse(clStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var clVal) && clVal > 0)
+                        filesize = clVal;
+
+                    int? height = f.TryGetProperty("height", out var hEl) && hEl.ValueKind == JsonValueKind.Number ? hEl.GetInt32() : null;
+                    int? width = f.TryGetProperty("width", out var wEl) && wEl.ValueKind == JsonValueKind.Number ? wEl.GetInt32() : null;
+
+                    int? bitrateKbps = null;
+                    if (f.TryGetProperty("averageBitrate", out var abEl) && abEl.ValueKind == JsonValueKind.Number && abEl.GetInt64() > 0)
+                        bitrateKbps = (int)Math.Round(abEl.GetInt64() / 1000.0);
+                    else if (f.TryGetProperty("bitrate", out var bEl) && bEl.ValueKind == JsonValueKind.Number && bEl.GetInt64() > 0)
+                        bitrateKbps = (int)Math.Round(bEl.GetInt64() / 1000.0);
+
+                    // Approximate size from bitrate * duration if contentLength was omitted
+                    if (filesize is null && bitrateKbps is > 0 && duration is { TotalSeconds: > 0 })
+                        filesize = (long)(bitrateKbps.Value * 1000.0 / 8.0 * duration.Value.TotalSeconds);
+
+                    var label = GetString(f, "qualityLabel") ?? GetString(f, "quality") ?? itag;
+                    var isCombined = hasVideo && hasAudio;
+
+                    rawFormats.Add(new YouTubeFormat(
+                        itag, label, ext, filesize, height, width, vcodec, acodec,
+                        hasVideo, hasAudio, isCombined, directUrl, null, null, userAgent, bitrateKbps));
+                }
+            }
+
+            AddArray("formats");
+            AddArray("adaptiveFormats");
+        }
+
+        return BuildVideoInfo(id, title, uploader, duration, thumbnail, originalUrl, rawFormats, hasFfmpeg);
+    }
+
+    private static (string Extension, string? VCodec, string? ACodec, bool HasVideo, bool HasAudio) ParseMimeType(string mimeType)
+    {
+        // e.g. "video/mp4; codecs=\"avc1.640028\"" or "video/mp4; codecs=\"avc1.42001E, mp4a.40.2\"" or "audio/mp4; codecs=\"mp4a.40.2\""
+        var isVideoMime = mimeType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
+        var isAudioMime = mimeType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase);
+        var ext = "mp4";
+        if (mimeType.Contains("webm", StringComparison.OrdinalIgnoreCase)) ext = "webm";
+        else if (isAudioMime && mimeType.Contains("mp4", StringComparison.OrdinalIgnoreCase)) ext = "m4a";
+        else if (mimeType.Contains("3gpp", StringComparison.OrdinalIgnoreCase)) ext = "3gp";
+
+        string? vcodec = null;
+        string? acodec = null;
+        var cm = Regex.Match(mimeType, @"codecs=""([^""]+)""", RegexOptions.IgnoreCase);
+        if (cm.Success)
+        {
+            var parts = cm.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (isVideoMime)
+            {
+                if (parts.Length >= 1) vcodec = parts[0];
+                if (parts.Length >= 2) acodec = parts[1];
+            }
+            else if (isAudioMime)
+            {
+                if (parts.Length >= 1) acodec = parts[0];
+            }
+        }
+        else
+        {
+            if (isVideoMime) vcodec = "unknown";
+            if (isAudioMime) acodec = "unknown";
+        }
+
+        return (ext, vcodec, acodec, vcodec is not null, acodec is not null);
+    }
+
+    private static string? ReadTextFromRunsOrSimple(JsonElement obj, string propName)
+    {
+        if (!obj.TryGetProperty(propName, out var el) || el.ValueKind != JsonValueKind.Object) return null;
+        if (GetString(el, "simpleText") is { } simple) return simple;
+        if (el.TryGetProperty("runs", out var runs) && runs.ValueKind == JsonValueKind.Array)
+        {
+            var sb = new StringBuilder();
+            foreach (var r in runs.EnumerateArray())
+            {
+                if (GetString(r, "text") is { } txt) sb.Append(txt);
+            }
+            if (sb.Length > 0) return sb.ToString();
+        }
+        return null;
+    }
+
+    private static TimeSpan? ExtractLockupDuration(JsonElement lockup)
+    {
+        if (!lockup.TryGetProperty("contentImage", out var ci)) return null;
+        if (!ci.TryGetProperty("thumbnailViewModel", out var tvm)) return null;
+        if (!tvm.TryGetProperty("overlays", out var overlays) || overlays.ValueKind != JsonValueKind.Array) return null;
+
+        foreach (var ov in overlays.EnumerateArray())
+        {
+            if (ov.TryGetProperty("thumbnailBottomOverlayViewModel", out var bottom)
+                && bottom.TryGetProperty("badges", out var badges)
+                && badges.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var b in badges.EnumerateArray())
+                {
+                    if (b.TryGetProperty("thumbnailBadgeViewModel", out var bvm)
+                        && GetString(bvm, "text") is { } txt)
+                    {
+                        var parsed = ParseDurationText(txt);
+                        if (parsed is not null) return parsed;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    internal static TimeSpan? ParseDurationText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var parts = text.Trim().Split(':');
+        if (parts.Length == 2
+            && int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var m)
+            && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var s))
+        {
+            return new TimeSpan(0, m, s);
+        }
+        if (parts.Length == 3
+            && int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var h)
+            && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var m3)
+            && int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var s3))
+        {
+            return new TimeSpan(h, m3, s3);
+        }
+        return null;
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private YouTubeVideoInfo ParseVideoInfo(JsonElement root, string originalUrl)
@@ -371,6 +840,19 @@ public sealed class YouTubeService
             }
         }
 
+        return BuildVideoInfo(id, title, uploader, duration, thumbnail, originalUrl, rawFormats, HasFfmpeg);
+    }
+
+    private static YouTubeVideoInfo BuildVideoInfo(
+        string id,
+        string title,
+        string? uploader,
+        TimeSpan? duration,
+        string? thumbnail,
+        string originalUrl,
+        List<YouTubeFormat> rawFormats,
+        bool hasFfmpeg)
+    {
         // Find best audio-only stream (prefer m4a/aac for universal MP4 compatibility, fallback to opus/webm)
         var bestM4aAudio = rawFormats
             .Where(f => !f.HasVideo && f.HasAudio && string.Equals(f.Extension, "m4a", StringComparison.OrdinalIgnoreCase))
@@ -385,7 +867,7 @@ public sealed class YouTubeService
         // Attach companion audio URL to video-only formats when ffmpeg is available
         var enriched = rawFormats.Select(f =>
         {
-            if (f.HasVideo && !f.HasAudio && HasFfmpeg && bestAnyAudio?.DirectUrl is not null)
+            if (f.HasVideo && !f.HasAudio && hasFfmpeg && bestAnyAudio?.DirectUrl is not null)
             {
                 return f with
                 {
@@ -398,7 +880,7 @@ public sealed class YouTubeService
 
         // Build clean deduplicated VIDEO QualityOptions: one best format per resolution (descending)
         var qualityOptions = new List<YouTubeFormat>();
-        var candidateVideos = HasFfmpeg
+        var candidateVideos = hasFfmpeg
             ? enriched.Where(f => f.HasVideo && (f.IsCombined || f.NeedsAudioMerge))
             : enriched.Where(f => f.IsCombined);
 
@@ -482,7 +964,20 @@ public sealed class YouTubeService
         };
         foreach (var arg in args) psi.ArgumentList.Add(arg);
 
-        using var proc = Process.Start(psi) ?? throw new InvalidOperationException($"Failed to start {Path.GetFileName(exePath)}.");
+        Process? proc;
+        try
+        {
+            proc = Process.Start(psi);
+        }
+        catch (Win32Exception ex)
+        {
+            if (string.Equals(exePath, _ytDlpPath, StringComparison.OrdinalIgnoreCase))
+                _ytDlpBlocked = true;
+            _log.LogWarning("Could not start {Exe} (NativeError={Code}): {Msg}", Path.GetFileName(exePath), ex.NativeErrorCode, ex.Message);
+            throw new YouTubeException($"External tool {Path.GetFileName(exePath)} could not be started ({ex.Message}).");
+        }
+        if (proc is null) throw new InvalidOperationException($"Failed to start {Path.GetFileName(exePath)}.");
+        using var _ = proc;
 
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();

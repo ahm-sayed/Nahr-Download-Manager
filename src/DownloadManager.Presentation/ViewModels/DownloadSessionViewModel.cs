@@ -53,6 +53,9 @@ public sealed class DownloadSessionViewModel : ObservableObject
     private QualityChoice? _savedVideoQuality;
     private QualityChoice? _savedAudioQuality;
     private long? _knownBytes;
+    private bool _isAllPlaylistSelected = true;
+    private bool _suppressPlaylistSelectAllCascade;
+    private int _selectedPlaylistCount;
 
     public event Action? RequestClose;
 
@@ -193,8 +196,8 @@ public sealed class DownloadSessionViewModel : ObservableObject
             SyncModeQualities();
         }
 
-        StartDownloadCommand = new AsyncRelayCommand(() => CommitAsync(startNow: true), () => !_isStarting);
-        DownloadLaterCommand = new AsyncRelayCommand(() => CommitAsync(startNow: false), () => !_isStarting);
+        StartDownloadCommand = new AsyncRelayCommand(() => CommitAsync(startNow: true), CanCommitPreDownload);
+        DownloadLaterCommand = new AsyncRelayCommand(() => CommitAsync(startNow: false), CanCommitPreDownload);
         BrowseCommand = new RelayCommand(() =>
         {
             var picked = _pickFolder(_destinationDirectory);
@@ -586,6 +589,59 @@ public sealed class DownloadSessionViewModel : ObservableObject
         SyncModeQualities();
     }
 
+    public ObservableCollection<PlaylistEntryItem> PlaylistEntries { get; } = new();
+    public bool HasPlaylistEntries => PlaylistEntries.Count > 0;
+    public int SelectedPlaylistCount => _selectedPlaylistCount;
+    public string PlaylistSelectionSummaryText => _loc.Format("pl_select_summary", _selectedPlaylistCount, PlaylistEntries.Count);
+
+    public bool IsAllPlaylistSelected
+    {
+        get => _isAllPlaylistSelected;
+        set
+        {
+            if (_suppressPlaylistSelectAllCascade)
+            {
+                Set(ref _isAllPlaylistSelected, value);
+                return;
+            }
+            _isAllPlaylistSelected = value;
+            OnPropertyChanged();
+            foreach (var entry in PlaylistEntries)
+                entry.SetSelectedSilently(value);
+            RefreshPlaylistSelectionState();
+        }
+    }
+
+    private bool CanCommitPreDownload() => !_isStarting && (!HasPlaylistEntries || _selectedPlaylistCount > 0);
+
+    private void RefreshPlaylistSelectionState()
+    {
+        _selectedPlaylistCount = PlaylistEntries.Count(e => e.IsSelected);
+        _suppressPlaylistSelectAllCascade = true;
+        try
+        {
+            Set(ref _isAllPlaylistSelected, PlaylistEntries.Count > 0 && _selectedPlaylistCount == PlaylistEntries.Count, nameof(IsAllPlaylistSelected));
+        }
+        finally
+        {
+            _suppressPlaylistSelectAllCascade = false;
+        }
+        OnPropertyChanged(nameof(SelectedPlaylistCount));
+        OnPropertyChanged(nameof(PlaylistSelectionSummaryText));
+        if (_selectedPlaylistCount > 0 && PreErrorMessage == _loc["pl_none_selected"])
+            PreErrorMessage = "";
+        (StartDownloadCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+        (DownloadLaterCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>Returns the playlist entries currently checked by the user (or all entries if the list has not loaded yet).</summary>
+    public IReadOnlyList<YouTubePlaylistEntry> GetSelectedPlaylistEntries()
+    {
+        if (PlaylistEntries.Count > 0)
+            return PlaylistEntries.Where(e => e.IsSelected).Select(e => e.Entry).ToList();
+        return ProbedPlaylistInfo?.Entries ?? Array.Empty<YouTubePlaylistEntry>();
+    }
+
     public void ApplyYouTubePlaylistProbe(YouTubePlaylistInfo playlist)
     {
         ProbedPlaylistInfo = playlist;
@@ -593,8 +649,18 @@ public sealed class DownloadSessionViewModel : ObservableObject
         if (!string.IsNullOrWhiteSpace(playlist.Title))
         {
             _baseTitle = SanitizeBaseName(playlist.Title);
-            FileName = $"{_baseTitle} ({playlist.Entries.Count} items)";
+            FileName = _baseTitle;
         }
+
+        PlaylistEntries.Clear();
+        var idx = 1;
+        foreach (var entry in playlist.Entries)
+        {
+            PlaylistEntries.Add(new PlaylistEntryItem(idx++, entry, RefreshPlaylistSelectionState));
+        }
+        OnPropertyChanged(nameof(HasPlaylistEntries));
+        RefreshPlaylistSelectionState();
+
         SizeText = _loc.Format("yt_playlist_found", playlist.Entries.Count);
         ProbeStatus = "";
         OnPropertyChanged(nameof(HasActionStatus));
@@ -787,6 +853,11 @@ public sealed class DownloadSessionViewModel : ObservableObject
     private async Task CommitAsync(bool startNow)
     {
         if (_commitPreDownloadAsync is null || _isStarting) return;
+        if (HasPlaylistEntries && _selectedPlaylistCount == 0)
+        {
+            PreErrorMessage = _loc["pl_none_selected"];
+            return;
+        }
         PreErrorMessage = "";
         IsStarting = true;
         OnPropertyChanged(nameof(HasActionStatus));
@@ -880,4 +951,41 @@ public sealed class DownloadSessionViewModel : ObservableObject
         }
         return "download";
     }
+}
+
+/// <summary>One selectable video row inside the pre-download YouTube playlist picker.</summary>
+public sealed class PlaylistEntryItem : ObservableObject
+{
+    private readonly Action _onSelectionChanged;
+    private bool _isSelected = true;
+
+    public PlaylistEntryItem(int index, YouTubePlaylistEntry entry, Action onSelectionChanged)
+    {
+        Index = index;
+        Entry = entry;
+        _onSelectionChanged = onSelectionChanged;
+    }
+
+    public int Index { get; }
+    public string IndexText => Index.ToString("00");
+    public YouTubePlaylistEntry Entry { get; }
+    public string VideoId => Entry.VideoId;
+    public string Title => Entry.Title;
+    public string Url => Entry.Url;
+
+    public string DurationText => Entry.Duration is { TotalSeconds: > 0 } d
+        ? (d.TotalHours >= 1 ? $"{(int)d.TotalHours}:{d.Minutes:00}:{d.Seconds:00}" : $"{d.Minutes}:{d.Seconds:00}")
+        : "";
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (Set(ref _isSelected, value))
+                _onSelectionChanged();
+        }
+    }
+
+    internal void SetSelectedSilently(bool value) => Set(ref _isSelected, value, nameof(IsSelected));
 }

@@ -631,6 +631,121 @@ internal static class YouTubeAndExtensionTests
             });
         }),
 
+        new("youtube native extractor: parses InnerTube playlist (lockupViewModel & playlistVideoRenderer) and player streams without yt-dlp", _ =>
+        {
+            var browseJson = """
+            {
+              "metadata": { "playlistMetadataRenderer": { "title": "Tajweed Series" } },
+              "contents": {
+                "items": [
+                  {
+                    "lockupViewModel": {
+                      "contentId": "abc12345678",
+                      "metadata": { "lockupMetadataViewModel": { "title": { "content": "Lesson 1: Intro" } } },
+                      "contentImage": {
+                        "thumbnailViewModel": {
+                          "overlays": [
+                            { "thumbnailBottomOverlayViewModel": { "badges": [{ "thumbnailBadgeViewModel": { "text": "12:34" } }] } }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "playlistVideoRenderer": {
+                      "videoId": "def87654321",
+                      "title": { "runs": [{ "text": "Lesson 2: Rules" }] },
+                      "lengthSeconds": "540"
+                    }
+                  }
+                ]
+              }
+            }
+            """;
+
+            var parsedPl = YouTubeService.ParseNativePlaylistBrowseJson(browseJson, "PLtest123");
+            Assert.Equal("Tajweed Series", parsedPl.Title, "playlist title");
+            Assert.Equal(2, parsedPl.Entries.Count, "parsed both lockupViewModel and playlistVideoRenderer");
+            Assert.Equal("abc12345678", parsedPl.Entries[0].VideoId, "first video id");
+            Assert.Equal("Lesson 1: Intro", parsedPl.Entries[0].Title, "first video title");
+            Assert.Equal(TimeSpan.FromMinutes(12) + TimeSpan.FromSeconds(34), parsedPl.Entries[0].Duration, "first duration");
+            Assert.Equal("def87654321", parsedPl.Entries[1].VideoId, "second video id");
+            Assert.Equal(TimeSpan.FromMinutes(9), parsedPl.Entries[1].Duration, "second duration");
+
+            var playerJson = """
+            {
+              "playabilityStatus": { "status": "OK" },
+              "videoDetails": { "videoId": "abc12345678", "title": "Lesson 1: Intro", "author": "Arabic101", "lengthSeconds": "754" },
+              "streamingData": {
+                "formats": [
+                  { "itag": 18, "url": "https://cdn.example/v360.mp4", "mimeType": "video/mp4; codecs=\"avc1.42001E, mp4a.40.2\"", "width": 640, "height": 360, "contentLength": "15000000", "qualityLabel": "360p" }
+                ],
+                "adaptiveFormats": [
+                  { "itag": 137, "url": "https://cdn.example/v1080.mp4", "mimeType": "video/mp4; codecs=\"avc1.640028\"", "width": 1920, "height": 1080, "contentLength": "80000000", "qualityLabel": "1080p" },
+                  { "itag": 140, "url": "https://cdn.example/a140.m4a", "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "contentLength": "6000000", "averageBitrate": 128000 }
+                ]
+              }
+            }
+            """;
+
+            var info = YouTubeService.ParseNativePlayerJson(playerJson, "https://www.youtube.com/watch?v=abc12345678", "TestUA", hasFfmpeg: true, out var err);
+            Assert.True(err is null && info is not null, "native player parsed cleanly");
+            Assert.Equal("Lesson 1: Intro", info!.Title, "video title");
+            Assert.True(info.QualityOptions.Any(q => q.Height == 1080 && q.NeedsAudioMerge), "1080p DASH enriched with m4a audio");
+            Assert.True(info.QualityOptions.Any(q => q.Height == 360 && q.IsCombined), "360p combined present");
+            Assert.True(info.AudioOptions.Any(a => a.Extension == "m4a"), "m4a audio option present");
+            return Task.CompletedTask;
+        }),
+
+        new("playlist picker: allows selecting/deselecting individual videos before download starts", async env =>
+        {
+            await using var rig = await VmRig.CreateAsync(env);
+            await rig.Ui.Run(() =>
+            {
+                var req = new ExtensionDownloadRequest
+                {
+                    Url = "https://www.youtube.com/playlist?list=PLpickerTest",
+                    MediaType = "playlist",
+                    PageTitle = "Tajweed Series",
+                };
+                var session = new DownloadSessionViewModel(req, env.Dir, rig.Vm.Loc, _ => null, (_, _) => Task.FromResult<DownloadItemViewModel?>(null));
+                session.ApplyYouTubePlaylistProbe(new YouTubePlaylistInfo
+                {
+                    Id = "PLpickerTest",
+                    Title = "Tajweed Series",
+                    Entries =
+                    [
+                        new YouTubePlaylistEntry("vid00000001", "Episode 1", "https://www.youtube.com/watch?v=vid00000001", TimeSpan.FromMinutes(10)),
+                        new YouTubePlaylistEntry("vid00000002", "Episode 2 (Skip me)", "https://www.youtube.com/watch?v=vid00000002", TimeSpan.FromMinutes(15)),
+                        new YouTubePlaylistEntry("vid00000003", "Episode 3", "https://www.youtube.com/watch?v=vid00000003", TimeSpan.FromMinutes(8)),
+                    ]
+                });
+
+                Assert.True(session.HasPlaylistEntries, "playlist entries loaded");
+                Assert.Equal(3, session.SelectedPlaylistCount, "all 3 selected initially");
+                Assert.True(session.IsAllPlaylistSelected, "select all checked initially");
+                Assert.True(session.StartDownloadCommand.CanExecute(null), "start enabled");
+
+                // Deselect the 2nd video
+                session.PlaylistEntries[1].IsSelected = false;
+                Assert.Equal(2, session.SelectedPlaylistCount, "2 selected after unchecking episode 2");
+                Assert.True(!session.IsAllPlaylistSelected, "select all unchecked when partial");
+                var picked = session.GetSelectedPlaylistEntries();
+                Assert.Equal(2, picked.Count, "only 2 entries returned");
+                Assert.True(picked.All(x => x.VideoId != "vid00000002"), "excluded skipped video");
+
+                // Deselect all -> Start disabled
+                session.IsAllPlaylistSelected = false;
+                Assert.Equal(0, session.SelectedPlaylistCount, "0 selected");
+                Assert.True(!session.StartDownloadCommand.CanExecute(null), "start disabled when 0 selected");
+
+                // Re-select all -> Start re-enabled
+                session.IsAllPlaylistSelected = true;
+                Assert.Equal(3, session.SelectedPlaylistCount, "all 3 re-selected");
+                Assert.True(session.StartDownloadCommand.CanExecute(null), "start re-enabled");
+            });
+        }),
+
         new("extension: server starts and responds to ping", async env =>
         {
             var port = 40000 + Random.Shared.Next(10000);

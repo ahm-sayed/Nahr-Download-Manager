@@ -388,19 +388,19 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
         session.IsProbing = true;
         try
         {
-            var isYtOrExtractor = YouTubeService.IsYouTubeUrl(req.Url) ||
-                                  string.Equals(req.MediaType, "ytdlp", StringComparison.OrdinalIgnoreCase);
+            var isYoutube = YouTubeService.IsYouTubeUrl(req.Url);
+            var isGenericExtractor = !isYoutube && string.Equals(req.MediaType, "ytdlp", StringComparison.OrdinalIgnoreCase);
 
-            if (isYtOrExtractor)
+            if (isYoutube || isGenericExtractor)
             {
-                if (!_youtube.IsAvailable)
+                if (isGenericExtractor && !_youtube.CanRunYtDlp)
                 {
                     session.ProbeStatus = Loc["yt_not_available"];
                     return;
                 }
 
                 session.ProbeStatus = Loc["yt_extracting"];
-                if (YouTubeService.IsPlaylistUrl(req.Url))
+                if (isYoutube && YouTubeService.IsPlaylistUrl(req.Url))
                 {
                     var playlist = await _youtube.GetPlaylistInfoAsync(req.Url).ConfigureAwait(true);
                     session.ApplyYouTubePlaylistProbe(playlist);
@@ -459,9 +459,9 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
         var chosenQuality = session.SelectedQuality;
         var wantAudio = session.IsAudioMode || (chosenQuality?.IsAudioMode ?? false);
 
-        var isYtOrExtractor = (YouTubeService.IsYouTubeUrl(origUrl) ||
-                               string.Equals(req?.MediaType, "ytdlp", StringComparison.OrdinalIgnoreCase)) &&
-                              _youtube.IsAvailable;
+        var isYoutube = YouTubeService.IsYouTubeUrl(origUrl);
+        var isYtOrExtractor = isYoutube ||
+                              (string.Equals(req?.MediaType, "ytdlp", StringComparison.OrdinalIgnoreCase) && _youtube.CanRunYtDlp);
 
         if (isYtOrExtractor)
         {
@@ -470,18 +470,24 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
                 try { await session.BackgroundProbeTask.ConfigureAwait(true); } catch { /* handled below */ }
             }
 
-            if (YouTubeService.IsPlaylistUrl(origUrl))
+            if (isYoutube && YouTubeService.IsPlaylistUrl(origUrl))
             {
                 var playlist = session.ProbedPlaylistInfo ?? await _youtube.GetPlaylistInfoAsync(origUrl).ConfigureAwait(true);
-                if (playlist.Entries.Count == 0) return null;
+                var selectedEntries = session.HasPlaylistEntries
+                    ? session.GetSelectedPlaylistEntries()
+                    : playlist.Entries;
+                if (selectedEntries.Count == 0)
+                    throw new InvalidOperationException(Loc["pl_none_selected"]);
 
                 var groupId = "pl:" + (string.IsNullOrWhiteSpace(playlist.Id)
                     ? (YouTubeService.ExtractPlaylistId(origUrl) ?? Guid.NewGuid().ToString("N")[..10])
                     : playlist.Id);
-                var groupTitle = !string.IsNullOrWhiteSpace(playlist.Title) ? playlist.Title : "YouTube Playlist";
+                var groupTitle = !string.IsNullOrWhiteSpace(session.FileName)
+                    ? SanitizeFileName(session.FileName)
+                    : (!string.IsNullOrWhiteSpace(playlist.Title) ? playlist.Title : "YouTube Playlist");
                 var playlistDir = Path.Combine(directory, SanitizeFileName(groupTitle));
 
-                var firstEntry = playlist.Entries[0];
+                var firstEntry = selectedEntries[0];
                 var firstVideoUrl = firstEntry.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase)
                     ? firstEntry.Url
                     : $"https://www.youtube.com/watch?v={firstEntry.VideoId}";
@@ -494,14 +500,14 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
                         firstVideoUrl, firstInfo, firstFmt, playlistDir, null, startNow, chosenQuality, wantAudio, groupId, groupTitle).ConfigureAwait(true);
                 }
 
-                if (playlist.Entries.Count > 1)
+                if (selectedEntries.Count > 1)
                 {
                     var rest = new YouTubePlaylistInfo
                     {
                         Id = playlist.Id,
                         Title = groupTitle,
                         Uploader = playlist.Uploader,
-                        Entries = playlist.Entries.Skip(1).ToList(),
+                        Entries = selectedEntries.Skip(1).ToList(),
                     };
                     _ = AddYouTubePlaylistAsync(origUrl, rest, directory, chosenQuality, wantAudio, startNow, groupId, groupTitle);
                 }
@@ -589,7 +595,7 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
         _addDialogProbeCts?.Dispose();
         _addDialogProbeCts = null;
 
-        if (dialog is null || !_youtube.IsAvailable) return;
+        if (dialog is null) return;
         var urls = AddDownloadViewModel.ParseUrls(text, out _);
         if (urls.Count != 1 || !YouTubeService.IsYouTubeUrl(urls[0]) || YouTubeService.IsPlaylistUrl(urls[0]))
         {
@@ -706,19 +712,13 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
                 ShowProgressWindow(firstVm);
         }
 
-        if ((youtubeVideoUrls.Count > 0 || youtubePlaylistUrls.Count > 0) && _youtube.IsAvailable)
+        if (youtubeVideoUrls.Count > 0 || youtubePlaylistUrls.Count > 0)
         {
             var (ytFailed, firstYtVm) = await AddYouTubeAsync(
                 youtubeVideoUrls, youtubePlaylistUrls, directory, startImmediately, selectedQuality, wantAudio, cachedInfo).ConfigureAwait(true);
             failed += ytFailed;
             if (showSingleProgressWindow && firstYtVm is not null)
                 ShowProgressWindow(firstYtVm);
-        }
-        else if ((youtubeVideoUrls.Count > 0 || youtubePlaylistUrls.Count > 0) && !_youtube.IsAvailable)
-        {
-            StatusMessage = Loc["yt_not_available"];
-            var (fbFailed, _) = await AddManyAsync(youtubeVideoUrls.Concat(youtubePlaylistUrls).ToList(), directory, connections, startImmediately).ConfigureAwait(true);
-            failed += fbFailed;
         }
 
         var notes = new List<string>();

@@ -15,6 +15,7 @@ public partial class DownloadWindow : Window
     private readonly DownloadSessionViewModel _vm;
     private bool _lastShowConnectionDetails;
     private bool _lastIsPreDownload;
+    private bool _lastHasPlaylistEntries;
     private int _lastTabIndex;
     private bool _layoutRefreshQueued;
 
@@ -24,6 +25,7 @@ public partial class DownloadWindow : Window
         _vm = viewModel;
         _lastShowConnectionDetails = viewModel.ShowConnectionDetails;
         _lastIsPreDownload = viewModel.IsPreDownload;
+        _lastHasPlaylistEntries = viewModel.HasPlaylistEntries;
         _lastTabIndex = GetTabIndex(viewModel);
         DataContext = viewModel;
         viewModel.RequestClose += Close;
@@ -48,18 +50,24 @@ public partial class DownloadWindow : Window
         {
             _layoutRefreshQueued = false;
             InvalidateMeasure();
+            UpdateLayout();
+            var work = SystemParameters.WorkArea;
+            if (ActualHeight > 0 && Top + ActualHeight > work.Bottom)
+                Top = Math.Max(work.Top + 12, work.Bottom - ActualHeight - 16);
         }, DispatcherPriority.Loaded);
     }
 
     private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         var showConn = _vm.ShowConnectionDetails;
+        var hasPl = _vm.HasPlaylistEntries;
         var tabIdx = GetTabIndex(_vm);
         var isPre = _vm.IsPreDownload;
 
-        if (showConn != _lastShowConnectionDetails || tabIdx != _lastTabIndex)
+        if (showConn != _lastShowConnectionDetails || hasPl != _lastHasPlaylistEntries || tabIdx != _lastTabIndex)
         {
             _lastShowConnectionDetails = showConn;
+            _lastHasPlaylistEntries = hasPl;
             _lastTabIndex = tabIdx;
             QueueSizeToContentRefresh();
         }

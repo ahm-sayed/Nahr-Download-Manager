@@ -4,7 +4,7 @@
 
 #define MyAppName "Nahr Download Manager"
 #define MyAppShortName "Nahr"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.3.1"
 #define MyAppPublisher "Nahr"
 #define MyAppURL "https://github.com/ahm-sayed/Nahr-Download-Manager"
 #define MyAppExeName "Nahr.exe"

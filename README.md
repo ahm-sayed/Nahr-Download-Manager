@@ -4,13 +4,13 @@
 
 ## Download & Install
 
-Download the latest **`Nahr-Setup-1.3.0.exe`** from [**GitHub Releases**](../../releases/latest) (self-contained Windows x64 installer — no `.NET 10` runtime required).
+Download the latest **`Nahr-Setup-1.3.1.exe`** from [**GitHub Releases**](../../releases/latest) (self-contained Windows x64 installer — no `.NET 10` runtime required).
 
 ## Features
 
 - **Multi-Segment Accelerated Downloads** — Up to 32 parallel connections per file with automatic single-stream fallback, resume validation (`ETag` / `Last-Modified`), and 10 Hz live telemetry.
 - **IDM-Style Multi-Tab Progress Window** — `Download status`, `Speed Limiter`, and `Options on completion` tabs with live connection map bar and per-connection table (`N. | Downloaded | Info`).
-- **YouTube, Playlists & HLS (`.m3u8`) Streaming Sites** — Dedicated **Video vs. Audio** mode switcher (`4K / 1080p / 720p / 480p / 360p MP4`, `MP3 320/192/128 kbps`, `M4A`) and multi-quality HLS variant discovery.
+- **YouTube, Playlists & HLS (`.m3u8`) Streaming Sites** — Built-in pure-C# YouTube extractor (no `yt-dlp.exe` required), interactive **Playlist Video Picker** before download starts, dedicated **Video vs. Audio** mode switcher (`4K / 1080p / 720p / 480p / 360p MP4`, `MP3 320/192/128 kbps`, `M4A`), and multi-quality HLS variant discovery.
 - **Browser Extension with Auto-Launch (`Native Messaging`)** — Manifest V3 extension (`browser-extension/`) for Chrome, Edge, Brave, and Firefox with an IDM-style floating video/audio download bar, in-browser quality menu, and **automatic background launch** even when Nahr is closed.
 - **Compact High-Density List & Expandable Playlists** — Multi-select checkboxes with contextual bulk toolbar (`Resume`, `Pause`, `Cancel`, `Remove`, `Delete from disk`) and nested playlist containers.
 - **Crash-Safe Persistence** — SQLite storage with durable pause/resume, automatic schema migrations, and optional auto-resume on startup.
@@ -29,10 +29,10 @@ Download the latest **`Nahr-Setup-1.3.0.exe`** from [**GitHub Releases**](../../
 # Build the entire solution (Release)
 dotnet build DownloadManager.sln -c Release
 
-# Run the full verification suite (113 tests)
+# Run the full verification suite (115 tests)
 dotnet run -c Release --no-build --project tests/DownloadManager.Verification
 
-# Build + verify + publish self-contained app (.\publish\Nahr.exe) + build installer (.\dist\Nahr-Setup-1.3.0.exe)
+# Build + verify + publish self-contained app (.\publish\Nahr.exe) + build installer (.\dist\Nahr-Setup-1.3.1.exe)
 .\build-windows.ps1 -BuildInstaller
 ```
 
@@ -55,5 +55,5 @@ Nahr/
 │  └─ DownloadManager.App/            WPF UI, themes, tray, clipboard & Windows Native Messaging integration
 └─ tests/
    ├─ DownloadManager.TestServer/     Local Kestrel HTTP test server with fault injection
-   └─ DownloadManager.Verification/   113 unit, integration, SQLite, MVVM, XAML, HLS, YouTube & extension tests
+   └─ DownloadManager.Verification/   115 unit, integration, SQLite, MVVM, XAML, HLS, YouTube & extension tests
 ```

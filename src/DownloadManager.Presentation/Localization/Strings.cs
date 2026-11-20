@@ -120,6 +120,9 @@ internal static class Strings
         ["confirm_delete_many"] = "Delete {0} selected file(s) from disk? This cannot be undone.",
         ["pl_items_count"] = "{0} videos",
         ["pl_progress_summary"] = "{0}/{1} done",
+        ["pl_select_all"] = "Select all videos",
+        ["pl_select_summary"] = "{0} / {1} selected",
+        ["pl_none_selected"] = "Please select at least one video to download.",
         ["toggle_details"] = "Details",
         // Extension / browser integration
         ["ext_connected"] = "Browser extension connected",
@@ -246,6 +249,9 @@ internal static class Strings
         ["confirm_delete_many"] = "هل تريد حذف {0} ملف(ات) محددة من القرص؟ لا يمكن التراجع عن هذا الإجراء.",
         ["pl_items_count"] = "{0} فيديو",
         ["pl_progress_summary"] = "{0}/{1} مكتمل",
+        ["pl_select_all"] = "تحديد كل الفيديوهات",
+        ["pl_select_summary"] = "تم تحديد {0} من {1}",
+        ["pl_none_selected"] = "يرجى تحديد فيديو واحد على الأقل للتحميل.",
         ["toggle_details"] = "التفاصيل",
         // Extension / browser integration
         ["ext_connected"] = "إضافة المتصفح متصلة",
