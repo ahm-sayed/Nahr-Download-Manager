@@ -30,14 +30,30 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": ["http://*/*", "https://*/*"],
+      "exclude_matches": [
+        "https://challenges.cloudflare.com/*",
+        "https://*.challenges.cloudflare.com/*",
+        "https://*.cloudflarecaptcha.com/*",
+        "https://*.hcaptcha.com/*",
+        "https://www.google.com/recaptcha/*",
+        "https://www.recaptcha.net/*"
+      ],
       "js": ["page-hook.js"],
       "run_at": "document_start",
       "all_frames": true,
       "world": "MAIN"
     },
     {
-      "matches": ["<all_urls>"],
+      "matches": ["http://*/*", "https://*/*"],
+      "exclude_matches": [
+        "https://challenges.cloudflare.com/*",
+        "https://*.challenges.cloudflare.com/*",
+        "https://*.cloudflarecaptcha.com/*",
+        "https://*.hcaptcha.com/*",
+        "https://www.google.com/recaptcha/*",
+        "https://www.recaptcha.net/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle",
       "all_frames": true

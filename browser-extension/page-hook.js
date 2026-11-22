@@ -6,6 +6,10 @@
 
 (() => {
   if (window.__nahrMainWorldHooked) return;
+  if (location.protocol !== "http:" && location.protocol !== "https:") return;
+  if (/(^|\.)(challenges\.cloudflare\.com|cloudflarecaptcha\.com|hcaptcha\.com|recaptcha\.net)$/i.test(location.hostname)) {
+    return;
+  }
   window.__nahrMainWorldHooked = true;
 
   const origFetch = typeof window.fetch === "function" ? window.fetch.bind(window) : null;
@@ -308,35 +312,47 @@
     } catch {}
   }
 
-  // 1. Passive fetch() wrapper
+  // 1. Passive fetch() wrapper (non-async pass-through so page fetch errors never create
+  // an extra extension stack frame or unhandled rejection in chrome://extensions)
   if (origFetch) {
-    window.fetch = async function (...args) {
-      const resp = await origFetch(...args);
+    window.fetch = function (...args) {
+      const reqUrl = typeof args[0] === "string" ? args[0] : args[0] && args[0].url;
+      const promise = origFetch(...args);
+      if (!reqUrl || /^(data|blob|about|javascript|chrome-extension):/i.test(reqUrl)) {
+        return promise;
+      }
       try {
-        const reqUrl = typeof args[0] === "string" ? args[0] : args[0] && args[0].url;
-        const ct = (resp.headers && resp.headers.get("content-type")) || "";
-        const looksRelevant =
-          /\.m3u8(\?|#|$)/i.test(reqUrl || "") ||
-          /mpegurl|json|text|octet-stream/i.test(ct) ||
-          /\/(master|playlist|index|manifest|hls|stream|sources|embed|ajax)/i.test(reqUrl || "") ||
-          /\.(txt|m3u8|json)(\?|$)/i.test(reqUrl || "");
+        promise.then(
+          (resp) => {
+            try {
+              if (!resp || !resp.clone) return;
+              const ct = (resp.headers && resp.headers.get("content-type")) || "";
+              const looksRelevant =
+                /\.m3u8(\?|#|$)/i.test(reqUrl) ||
+                /mpegurl|json|text|octet-stream/i.test(ct) ||
+                /\/(master|playlist|index|manifest|hls|stream|sources|embed|ajax)/i.test(reqUrl) ||
+                /\.(txt|m3u8|json)(\?|$)/i.test(reqUrl);
 
-        if (looksRelevant && resp.clone) {
-          resp
-            .clone()
-            .text()
-            .then((txt) => {
-              if (!txt) return;
-              if (txt.slice(0, 512).includes("#EXTM3U")) {
-                notifyStream(resp.url || reqUrl, txt.slice(0, 32768));
-              } else if (txt.includes(".m3u8")) {
-                scanJsonForStreams(txt);
+              if (looksRelevant) {
+                resp
+                  .clone()
+                  .text()
+                  .then((txt) => {
+                    if (!txt) return;
+                    if (txt.slice(0, 512).includes("#EXTM3U")) {
+                      notifyStream(resp.url || reqUrl, txt.slice(0, 32768));
+                    } else if (txt.includes(".m3u8")) {
+                      scanJsonForStreams(txt);
+                    }
+                  })
+                  .catch(() => {});
               }
-            })
-            .catch(() => {});
-        }
+            } catch {}
+          },
+          () => {}
+        );
       } catch {}
-      return resp;
+      return promise;
     };
   }
 
