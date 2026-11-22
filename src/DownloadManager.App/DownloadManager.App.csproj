@@ -6,6 +6,7 @@
     <RootNamespace>DownloadManager.App</RootNamespace>
     <AssemblyName>Nahr</AssemblyName>
     <ApplicationIcon>Assets\nahr.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>

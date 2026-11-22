@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using DownloadManager.Core.Abstractions;
 using DownloadManager.Core.Models;
 using DownloadManager.TestServer;
@@ -357,5 +359,161 @@ public static class EngineTests
             var seq = statuses.ToArray().Aggregate(new List<DownloadStatus>(), (l, s) => { if (l.Count == 0 || l[^1] != s) l.Add(s); return l; });
             Assert.Equal("Queued,Probing,Downloading,Completed", string.Join(',', seq), "status sequence");
         });
+
+        yield return new TestCase("rate limit: HTTP 429 on excess connections scales concurrency down and completes", async env =>
+        {
+            const long size = 1 * MiB;
+            const int maxConcurrent = 2;
+            var active = 0;
+            var rejected429 = 0;
+            var port = GetFreeTcpPort();
+            using var listener = new HttpListener();
+            listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+            listener.Start();
+
+            using var serverCts = CancellationTokenSource.CreateLinkedTokenSource(env.Ct);
+            var serverLoop = Task.Run(async () =>
+            {
+                while (!serverCts.IsCancellationRequested)
+                {
+                    HttpListenerContext ctx;
+                    try { ctx = await listener.GetContextAsync().WaitAsync(serverCts.Token); }
+                    catch { break; }
+
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var req = ctx.Request;
+                            var resp = ctx.Response;
+                            if (string.Equals(req.HttpMethod, "HEAD", StringComparison.OrdinalIgnoreCase))
+                            {
+                                resp.StatusCode = 206;
+                                resp.Headers["Accept-Ranges"] = "bytes";
+                                resp.Headers["Content-Range"] = $"bytes 0-0/{size}";
+                                resp.ContentLength64 = 1;
+                                resp.Close();
+                                return;
+                            }
+
+                            var cur = Interlocked.Increment(ref active);
+                            try
+                            {
+                                if (cur > maxConcurrent)
+                                {
+                                    Interlocked.Increment(ref rejected429);
+                                    resp.StatusCode = 429;
+                                    resp.Close();
+                                    return;
+                                }
+
+                                var rangeHeader = req.Headers["Range"];
+                                long start = 0, end = size - 1;
+                                if (!string.IsNullOrEmpty(rangeHeader) && rangeHeader.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    var parts = rangeHeader["bytes=".Length..].Split('-');
+                                    start = long.Parse(parts[0]);
+                                    if (parts.Length > 1 && !string.IsNullOrEmpty(parts[1]))
+                                        end = long.Parse(parts[1]);
+                                }
+                                var len = end - start + 1;
+                                resp.StatusCode = 206;
+                                resp.Headers["Accept-Ranges"] = "bytes";
+                                resp.Headers["Content-Range"] = $"bytes {start}-{end}/{size}";
+                                resp.ContentLength64 = len;
+
+                                var buf = new byte[32 * 1024];
+                                var offset = start;
+                                var remaining = len;
+                                while (remaining > 0)
+                                {
+                                    var n = (int)Math.Min(buf.Length, remaining);
+                                    TestData.Fill(buf.AsSpan(0, n), offset, seed: 1);
+                                    await resp.OutputStream.WriteAsync(buf.AsMemory(0, n), serverCts.Token);
+                                    await Task.Delay(25, serverCts.Token);
+                                    offset += n;
+                                    remaining -= n;
+                                }
+                                resp.Close();
+                            }
+                            finally
+                            {
+                                Interlocked.Decrement(ref active);
+                            }
+                        }
+                        catch { }
+                    });
+                }
+            });
+
+            try
+            {
+                var engine = env.NewEngine();
+                var item = await env.DownloadAsync(engine, new Uri($"http://127.0.0.1:{port}/mediafire-sim.zip"), connections: 8);
+                Assert.FileMatches(item, size);
+                Assert.True(Volatile.Read(ref rejected429) >= 2, $"expected server to return HTTP 429 for excess connections, got {rejected429}");
+            }
+            finally
+            {
+                serverCts.Cancel();
+                listener.Stop();
+                await serverLoop;
+            }
+        });
+
+        yield return new TestCase("rate limit: permanent HTTP 429 on all segments still gives up cleanly", async env =>
+        {
+            const long size = 512 * 1024;
+            var port = GetFreeTcpPort();
+            using var listener = new HttpListener();
+            listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+            listener.Start();
+
+            using var serverCts = CancellationTokenSource.CreateLinkedTokenSource(env.Ct);
+            var serverLoop = Task.Run(async () =>
+            {
+                while (!serverCts.IsCancellationRequested)
+                {
+                    HttpListenerContext ctx;
+                    try { ctx = await listener.GetContextAsync().WaitAsync(serverCts.Token); }
+                    catch { break; }
+
+                    var resp = ctx.Response;
+                    if (string.Equals(ctx.Request.HttpMethod, "HEAD", StringComparison.OrdinalIgnoreCase))
+                    {
+                        resp.StatusCode = 206;
+                        resp.Headers["Accept-Ranges"] = "bytes";
+                        resp.Headers["Content-Range"] = $"bytes 0-0/{size}";
+                        resp.ContentLength64 = 1;
+                    }
+                    else
+                    {
+                        resp.StatusCode = 429;
+                    }
+                    try { resp.Close(); } catch { }
+                }
+            });
+
+            try
+            {
+                var engine = env.NewEngine(tweak: o => o.MaxRetries = 3);
+                var item = await env.DownloadAsync(engine, new Uri($"http://127.0.0.1:{port}/always-429.bin"), connections: 4);
+                Assert.Equal(DownloadStatus.Failed, item.Status, "permanent 429 should fail cleanly");
+                Assert.True(item.ErrorMessage?.Contains("429") == true, $"expected 429 error message, got: {item.ErrorMessage}");
+            }
+            finally
+            {
+                serverCts.Cancel();
+                listener.Stop();
+                await serverLoop;
+            }
+        });
+    }
+
+    private static int GetFreeTcpPort()
+    {
+        using var l = new TcpListener(IPAddress.Loopback, 0);
+        l.Start();
+        return ((IPEndPoint)l.LocalEndpoint).Port;
     }
 }

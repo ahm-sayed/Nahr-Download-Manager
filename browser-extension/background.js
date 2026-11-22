@@ -9,6 +9,7 @@ let nahrEnabled = true;
 let nahrConnected = false;
 let bypassUntil = 0;
 let launchingPromise = null;
+let nativeLaunchCooldownUntil = 0;
 
 // Map<tabId, Array<{url, masterUrl, audioUrl, label, extension, fileSize, height, bandwidth, mediaType, isMaster, referer, origin}>>
 const tabMedia = new Map();
@@ -92,19 +93,29 @@ function sendNativeHostMessage(payload) {
 }
 
 async function ensureNahrRunning() {
-  if (await checkConnection()) return true;
+  if (await checkConnection()) {
+    nativeLaunchCooldownUntil = 0;
+    return true;
+  }
+  if (Date.now() < nativeLaunchCooldownUntil) return false;
   if (launchingPromise) return await launchingPromise;
 
   launchingPromise = (async () => {
     const res = await sendNativeHostMessage({ action: "ensureRunning" });
     if (res && res.ok) {
+      nativeLaunchCooldownUntil = 0;
       return await checkConnection();
     }
     // Even if native host timed out early while Nahr was finishing startup, probe briefly
     for (let i = 0; i < 6; i++) {
       await new Promise((r) => setTimeout(r, 250));
-      if (await checkConnection()) return true;
+      if (await checkConnection()) {
+        nativeLaunchCooldownUntil = 0;
+        return true;
+      }
     }
+    // Back off for 30s if Native Messaging failed (e.g. blocked by OS policy or app uninstalled)
+    nativeLaunchCooldownUntil = Date.now() + 30000;
     return false;
   })();
 

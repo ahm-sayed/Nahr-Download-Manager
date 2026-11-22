@@ -32,6 +32,18 @@ internal sealed class DownloadJob(
     private Exception? _fault;
     private int _activeConnections;
 
+    // Adaptive concurrency gate for segmented downloads: dynamically scales down concurrent
+    // connections when a host returns HTTP 429 (TooManyRequests) or 503 (ServiceUnavailable)
+    // instead of burning retries and killing healthy active streams.
+    private readonly object _gateLock = new();
+    private TaskCompletionSource _gateSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _allowedConcurrency;
+    private int _inFlight;
+    private int _streaming;
+    private long _rateLimitEpoch;
+    private int _globalRateLimitFailures;
+    private DateTimeOffset _cooldownUntil = DateTimeOffset.MinValue;
+
     public async Task RunAsync(CancellationToken ct)
     {
         var forceSingle = false;
@@ -221,6 +233,7 @@ internal sealed class DownloadJob(
         {
             using var workerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var pending = item.Segments.Where(s => !s.IsComplete).ToList();
+            InitConcurrencyGate(pending.Count);
             log.LogInformation("Downloading {Url}: {Count} segment(s) of {Total} bytes", UrlRedactor.Redact(item.Url), pending.Count, total);
 
             await Task.WhenAll(pending.Select(s => RunWorkerAsync(s, workerCts))).ConfigureAwait(false);
@@ -236,17 +249,231 @@ internal sealed class DownloadJob(
         }
     }
 
+    private void InitConcurrencyGate(int initialConcurrency)
+    {
+        lock (_gateLock)
+        {
+            _allowedConcurrency = Math.Max(1, initialConcurrency);
+            _inFlight = 0;
+            _streaming = 0;
+            _rateLimitEpoch = 0;
+            _globalRateLimitFailures = 0;
+            _cooldownUntil = DateTimeOffset.MinValue;
+            Volatile.Write(ref _activeConnections, 0);
+        }
+    }
+
+    private static bool IsRateLimit(DownloadHttpException ex) =>
+        ex.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable;
+
+    private TaskCompletionSource SwapSignalLocked()
+    {
+        var old = _gateSignal;
+        _gateSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        return old;
+    }
+
+    private async Task<long> AcquireSlotAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            Task waitTask;
+            var cooldownDelay = TimeSpan.Zero;
+            lock (_gateLock)
+            {
+                var now = DateTimeOffset.UtcNow;
+                if (_inFlight < _allowedConcurrency && now >= _cooldownUntil)
+                {
+                    _inFlight++;
+                    Volatile.Write(ref _activeConnections, _inFlight);
+                    return _rateLimitEpoch;
+                }
+
+                if (now < _cooldownUntil)
+                    cooldownDelay = _cooldownUntil - now;
+                waitTask = _gateSignal.Task;
+            }
+
+            if (cooldownDelay > TimeSpan.Zero)
+                await Task.Delay(cooldownDelay, ct).ConfigureAwait(false);
+            else
+                await waitTask.WaitAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    private void MarkStreamingStarted()
+    {
+        lock (_gateLock)
+        {
+            _streaming++;
+            _globalRateLimitFailures = 0;
+        }
+    }
+
+    private void ReleaseSlot(bool wasStreaming)
+    {
+        TaskCompletionSource? toSignal;
+        lock (_gateLock)
+        {
+            if (wasStreaming && _streaming > 0) _streaming--;
+            if (_inFlight > 0) _inFlight--;
+            Volatile.Write(ref _activeConnections, _inFlight);
+            toSignal = SwapSignalLocked();
+        }
+        toSignal.TrySetResult();
+    }
+
+    private (bool Fatal, TimeSpan Cooldown, int NewLimit, int ActiveStreaming) ReleaseSlotOnRateLimit(
+        bool wasStreaming, DownloadHttpException ex, long acquiredEpoch)
+    {
+        TaskCompletionSource? toSignal = null;
+        var fatal = false;
+        TimeSpan delay;
+        int newLimit;
+        int activeStreaming;
+
+        lock (_gateLock)
+        {
+            if (wasStreaming && _streaming > 0) _streaming--;
+            if (_inFlight > 0) _inFlight--;
+            Volatile.Write(ref _activeConnections, _inFlight);
+
+            var now = DateTimeOffset.UtcNow;
+            activeStreaming = _streaming;
+
+            if (activeStreaming > 0)
+            {
+                // Other connections are actively downloading: the server simply caps simultaneous
+                // connections (e.g. MediaFire). Clamp concurrency to activeStreaming and park this
+                // worker until an active segment finishes — never abort healthy streams.
+                if (_allowedConcurrency > activeStreaming)
+                    _allowedConcurrency = Math.Max(1, activeStreaming);
+                if (acquiredEpoch == _rateLimitEpoch)
+                    _rateLimitEpoch++;
+
+                delay = ComputeRateLimitDelay(1, ex);
+                var targetCooldown = now + delay;
+                if (targetCooldown > _cooldownUntil) _cooldownUntil = targetCooldown;
+                newLimit = _allowedConcurrency;
+                toSignal = SwapSignalLocked();
+            }
+            else if (acquiredEpoch < _rateLimitEpoch)
+            {
+                // A sibling worker from the exact same burst already scaled concurrency down and
+                // set the cooldown; simply park until the cooldown / slot opens.
+                delay = _cooldownUntil > now ? _cooldownUntil - now : TimeSpan.Zero;
+                newLimit = _allowedConcurrency;
+                toSignal = SwapSignalLocked();
+            }
+            else
+            {
+                _rateLimitEpoch++;
+                if (_allowedConcurrency > 1)
+                {
+                    _allowedConcurrency = Math.Max(1, _allowedConcurrency / 2);
+                    delay = ComputeRateLimitDelay(1, ex);
+                    var targetCooldown = now + delay;
+                    if (targetCooldown > _cooldownUntil) _cooldownUntil = targetCooldown;
+                    newLimit = _allowedConcurrency;
+                    toSignal = SwapSignalLocked();
+                }
+                else
+                {
+                    // Even a single connection got 429/503 with zero active streams: count toward MaxRetries.
+                    _globalRateLimitFailures++;
+                    if (_globalRateLimitFailures > options.MaxRetries)
+                    {
+                        fatal = true;
+                        delay = TimeSpan.Zero;
+                    }
+                    else
+                    {
+                        delay = ComputeRateLimitDelay(_globalRateLimitFailures, ex);
+                        var targetCooldown = now + delay;
+                        if (targetCooldown > _cooldownUntil) _cooldownUntil = targetCooldown;
+                    }
+                    newLimit = _allowedConcurrency;
+                    toSignal = SwapSignalLocked();
+                }
+            }
+        }
+
+        toSignal?.TrySetResult();
+        return (fatal, delay, newLimit, activeStreaming);
+    }
+
+    private TimeSpan ComputeRateLimitDelay(int attempt, DownloadHttpException ex)
+    {
+        var delay = _retry.GetDelay(attempt, ex);
+        // For HTTP 429 without an explicit Retry-After header, use a calmer floor (4x BaseRetryDelay,
+        // capped at MaxRetryDelay) so strict rate-limiters recover cleanly without getting hammered.
+        if (ex.StatusCode == HttpStatusCode.TooManyRequests && ex.RetryAfter is null)
+        {
+            var floorMs = Math.Min(options.MaxRetryDelay.TotalMilliseconds, options.BaseRetryDelay.TotalMilliseconds * 4);
+            if (delay.TotalMilliseconds < floorMs)
+                delay = TimeSpan.FromMilliseconds(floorMs);
+        }
+        return delay;
+    }
+
     private async Task RunWorkerAsync(SegmentInfo seg, CancellationTokenSource workerCts)
     {
-        Interlocked.Increment(ref _activeConnections);
+        var failures = 0;
         try
         {
             // A successful attempt may still leave the segment incomplete (server clamped the range): keep going.
             while (!seg.IsComplete)
             {
                 workerCts.Token.ThrowIfCancellationRequested();
-                await _retry.ExecuteAsync(t => DownloadSegmentOnceAsync(seg, t), workerCts.Token,
-                    OnRetry($"segment {seg.Index}"), progress: () => seg.Downloaded).ConfigureAwait(false);
+                var epoch = await AcquireSlotAsync(workerCts.Token).ConfigureAwait(false);
+                var startedStreaming = false;
+                var released = false;
+                var before = seg.Downloaded;
+
+                try
+                {
+                    await DownloadSegmentOnceAsync(seg, () =>
+                    {
+                        startedStreaming = true;
+                        MarkStreamingStarted();
+                    }, workerCts.Token).ConfigureAwait(false);
+                    failures = 0;
+                }
+                catch (OperationCanceledException) when (workerCts.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (DownloadHttpException ex) when (IsRateLimit(ex))
+                {
+                    var (fatal, delay, newLimit, activeStreaming) = ReleaseSlotOnRateLimit(startedStreaming, ex, epoch);
+                    released = true;
+
+                    if (fatal)
+                        throw new DownloadException($"Giving up after {options.MaxRetries} retries: {ex.Message}", ex);
+
+                    log.LogWarning(
+                        "Rate limited ({Status}) on segment {Index} of {Url}; scaling concurrency to {Limit} (active={Active}), cooldown {Delay} ms",
+                        (int)ex.StatusCode, seg.Index, UrlRedactor.Redact(item.Url), newLimit, activeStreaming, (int)delay.TotalMilliseconds);
+                }
+                catch (Exception ex) when (RetryPolicy.IsTransient(ex))
+                {
+                    ReleaseSlot(startedStreaming);
+                    released = true;
+
+                    if (seg.Downloaded > before) failures = 0;
+                    failures++;
+                    if (failures > options.MaxRetries)
+                        throw new DownloadException($"Giving up after {options.MaxRetries} retries: {ex.Message}", ex);
+
+                    var delay = _retry.GetDelay(failures, ex);
+                    OnRetry($"segment {seg.Index}")(failures, delay, ex);
+                    await Task.Delay(delay, workerCts.Token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    if (!released) ReleaseSlot(startedStreaming);
+                }
             }
         }
         catch (OperationCanceledException) when (workerCts.IsCancellationRequested)
@@ -258,13 +485,9 @@ internal sealed class DownloadJob(
             Interlocked.CompareExchange(ref _fault, ex, null);
             workerCts.Cancel();
         }
-        finally
-        {
-            Interlocked.Decrement(ref _activeConnections);
-        }
     }
 
-    private async Task DownloadSegmentOnceAsync(SegmentInfo seg, CancellationToken ct)
+    private async Task DownloadSegmentOnceAsync(SegmentInfo seg, Action onStreamingStarted, CancellationToken ct)
     {
         if (seg.IsComplete) return;
         var start = seg.NextOffset;
@@ -278,6 +501,7 @@ internal sealed class DownloadJob(
 
         using var resp = await HttpProbe.SendForHeadersAsync(http, req, options.ResponseHeadersTimeout, ct).ConfigureAwait(false);
         ValidateSegmentResponse(resp, start, end);
+        onStreamingStarted();
         var expectedEnd = resp.Content.Headers.ContentRange!.To!.Value;
 
         await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
