@@ -1,10 +1,10 @@
 ; Nahr Download Manager — Windows Installer Script (Inno Setup 6)
-; Builds a self-contained single-file Setup executable (dist\Nahr-Setup-1.3.4.exe)
+; Builds a self-contained single-file Setup executable (dist\Nahr-Setup-1.3.5.exe)
 ; including the Nahr WPF desktop app (.NET 10 self-contained win-x64) and browser extension.
 
 #define MyAppName "Nahr Download Manager"
 #define MyAppShortName "Nahr"
-#define MyAppVersion "1.3.4"
+#define MyAppVersion "1.3.5"
 #define MyAppPublisher "Nahr"
 #define MyAppURL "https://github.com/ahm-sayed/Nahr-Download-Manager"
 #define MyAppExeName "Nahr.exe"

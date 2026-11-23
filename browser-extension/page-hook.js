@@ -312,83 +312,55 @@
     } catch {}
   }
 
-  // 1. Passive fetch() wrapper (non-async pass-through so page fetch errors never create
-  // an extra extension stack frame or unhandled rejection in chrome://extensions)
-  if (origFetch) {
-    window.fetch = function (...args) {
-      const reqUrl = typeof args[0] === "string" ? args[0] : args[0] && args[0].url;
-      const promise = origFetch(...args);
-      if (!reqUrl || /^(data|blob|about|javascript|chrome-extension):/i.test(reqUrl)) {
-        return promise;
-      }
-      try {
-        promise.then(
-          (resp) => {
-            try {
-              if (!resp || !resp.clone) return;
-              const ct = (resp.headers && resp.headers.get("content-type")) || "";
-              const looksRelevant =
-                /\.m3u8(\?|#|$)/i.test(reqUrl) ||
-                /mpegurl|json|text|octet-stream/i.test(ct) ||
-                /\/(master|playlist|index|manifest|hls|stream|sources|embed|ajax)/i.test(reqUrl) ||
-                /\.(txt|m3u8|json)(\?|$)/i.test(reqUrl);
+  // 1. Passive PerformanceObserver for fetch()/.m3u8 URLs (does NOT monkey-patch window.fetch,
+  // so page fetch errors and unhandled rejections never blame Nahr in chrome://extensions).
+  try {
+    if (typeof PerformanceObserver === "function") {
+      const obs = new PerformanceObserver((list) => {
+        try {
+          for (const entry of list.getEntries()) {
+            const name = entry && entry.name;
+            if (name && /\.m3u8(\?|#|$)/i.test(name)) {
+              notifyStream(name, "");
+            }
+          }
+        } catch {}
+      });
+      obs.observe({ type: "resource", buffered: true });
+    }
+  } catch {}
 
-              if (looksRelevant) {
-                resp
-                  .clone()
-                  .text()
-                  .then((txt) => {
-                    if (!txt) return;
-                    if (txt.slice(0, 512).includes("#EXTM3U")) {
-                      notifyStream(resp.url || reqUrl, txt.slice(0, 32768));
-                    } else if (txt.includes(".m3u8")) {
-                      scanJsonForStreams(txt);
-                    }
-                  })
-                  .catch(() => {});
-              }
-            } catch {}
-          },
-          () => {}
-        );
-      } catch {}
-      return promise;
-    };
-  }
-
-  // 2. Passive XMLHttpRequest wrapper (used heavily by hls.js & JWPlayer)
+  // 2. Passive XMLHttpRequest.open listener (used by hls.js & JWPlayer) without patching XHR.send,
+  // so blocked local/chrome:// probes or network failures never put page-hook.js on the stack.
+  const NON_STREAM_URL_RX = /^(chrome|chrome-extension|moz-extension|data|blob|about|javascript|file):/i;
+  const STATIC_ASSET_RX = /\.(png|jpe?g|gif|webp|svg|ico|woff2?|ttf|eot|css|map)(\?|#|$)/i;
   const origOpen = XMLHttpRequest.prototype.open;
-  const origSend = XMLHttpRequest.prototype.send;
+
+  function onXhrLoad() {
+    try {
+      const finalUrl = this.responseURL || this.__nahrReqUrl || "";
+      if (!finalUrl || NON_STREAM_URL_RX.test(finalUrl)) return;
+      if (this.responseType === "" || this.responseType === "text") {
+        const txt = typeof this.responseText === "string" ? this.responseText.slice(0, 32768) : "";
+        if (txt.slice(0, 512).includes("#EXTM3U")) {
+          notifyStream(finalUrl, txt);
+        } else if (txt.includes(".m3u8")) {
+          scanJsonForStreams(txt);
+        }
+      } else if (/\.m3u8(\?|#|$)/i.test(finalUrl)) {
+        notifyStream(finalUrl, "");
+      }
+    } catch {}
+  }
 
   XMLHttpRequest.prototype.open = function (method, url, ...rest) {
     try {
-      this.__nahrReqUrl = typeof url === "string" ? url : String(url || "");
+      const urlStr = typeof url === "string" ? url : String(url || "");
+      if (urlStr && !NON_STREAM_URL_RX.test(urlStr) && !STATIC_ASSET_RX.test(urlStr)) {
+        this.__nahrReqUrl = urlStr;
+        this.addEventListener("load", onXhrLoad, { once: true, passive: true });
+      }
     } catch {}
     return origOpen.call(this, method, url, ...rest);
-  };
-
-  XMLHttpRequest.prototype.send = function (...args) {
-    try {
-      this.addEventListener(
-        "load",
-        function () {
-          try {
-            const finalUrl = this.responseURL || this.__nahrReqUrl || "";
-            if (this.responseType === "" || this.responseType === "text") {
-              const txt = typeof this.responseText === "string" ? this.responseText.slice(0, 32768) : "";
-              if (txt.slice(0, 512).includes("#EXTM3U")) {
-                notifyStream(finalUrl, txt);
-              } else if (txt.includes(".m3u8")) {
-                scanJsonForStreams(txt);
-              }
-            } else if (/\.m3u8(\?|#|$)/i.test(finalUrl)) {
-              notifyStream(finalUrl, "");
-            }
-          } catch {}
-        },
-        { once: true, passive: true }
-      );
-    } catch {}
-    return origSend.apply(this, args);
   };
 })();

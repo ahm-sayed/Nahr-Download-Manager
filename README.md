@@ -4,7 +4,7 @@
 
 ## Download & Install
 
-Download the latest **`Nahr-Setup-1.3.4.exe`** from [**GitHub Releases**](../../releases/latest) (self-contained Windows x64 installer — no `.NET 10` runtime required).
+Download the latest **`Nahr-Setup-1.3.5.exe`** from [**GitHub Releases**](../../releases/latest) (self-contained Windows x64 installer — no `.NET 10` runtime required).
 
 ## Features
 
@@ -29,10 +29,10 @@ Download the latest **`Nahr-Setup-1.3.4.exe`** from [**GitHub Releases**](../../
 # Build the entire solution (Release)
 dotnet build DownloadManager.sln -c Release
 
-# Run the full verification suite (120 tests)
+# Run the full verification suite (121 tests)
 dotnet run -c Release --no-build --project tests/DownloadManager.Verification
 
-# Build + verify + publish self-contained app (.\publish\Nahr.exe) + build installer (.\dist\Nahr-Setup-1.3.4.exe)
+# Build + verify + publish self-contained app (.\publish\Nahr.exe) + build installer (.\dist\Nahr-Setup-1.3.5.exe)
 .\build-windows.ps1 -BuildInstaller
 ```
 
@@ -55,5 +55,5 @@ Nahr/
 │  └─ DownloadManager.App/            WPF UI, themes, tray, clipboard & Windows Native Messaging integration
 └─ tests/
    ├─ DownloadManager.TestServer/     Local Kestrel HTTP test server with fault injection
-   └─ DownloadManager.Verification/   120 unit, integration, SQLite, MVVM, XAML, HLS, YouTube & extension tests
+   └─ DownloadManager.Verification/   121 unit, integration, SQLite, MVVM, XAML, HLS, YouTube & extension tests
 ```

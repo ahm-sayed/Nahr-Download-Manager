@@ -90,7 +90,9 @@ internal sealed class DownloadJob(
         ReconcileWithProbe(probe, segmented);
 
         // Check if this looks like an HTML page instead of a file
-        if (probe.ContentType?.StartsWith("text/html", StringComparison.OrdinalIgnoreCase) == true)
+        if (probe.ContentType is not null &&
+            (probe.ContentType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase) ||
+             probe.ContentType.StartsWith("application/xhtml", StringComparison.OrdinalIgnoreCase)))
         {
             item.NeedsHtmlWarning = true;
         }
@@ -633,6 +635,17 @@ internal sealed class DownloadJob(
         if (resp.StatusCode != HttpStatusCode.OK)
             throw new DownloadHttpException(resp.StatusCode, HttpProbe.RetryAfterOf(resp));
         CheckValidators(resp);
+
+        var respCt = resp.Content.Headers.ContentType?.MediaType;
+        if (!string.IsNullOrWhiteSpace(respCt))
+        {
+            item.ContentType = respCt;
+            if (respCt.StartsWith("text/html", StringComparison.OrdinalIgnoreCase) ||
+                respCt.StartsWith("application/xhtml", StringComparison.OrdinalIgnoreCase))
+            {
+                item.NeedsHtmlWarning = true;
+            }
+        }
 
         var declared = resp.Content.Headers.ContentLength;
         await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);

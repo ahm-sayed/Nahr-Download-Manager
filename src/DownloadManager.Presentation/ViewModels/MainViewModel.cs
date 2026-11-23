@@ -27,9 +27,10 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
     private readonly IShellService _shell;
     private readonly string _defaultDirectory;
     private readonly Dictionary<Guid, DownloadItemViewModel> _byId = new();
+    private sealed record BrowserInterceptionMeta(string? ExpectedMimeType, long? ExpectedBytes);
     private readonly Dictionary<string, DownloadItemViewModel> _playlistGroups = new(StringComparer.Ordinal);
     private readonly HashSet<Guid> _removed = new();
-    private readonly HashSet<Guid> _browserInterceptedIds = new();
+    private readonly Dictionary<Guid, BrowserInterceptionMeta> _browserIntercepted = new();
     private readonly object _progressGate = new();
     private readonly Dictionary<Guid, DownloadProgress> _pendingProgress = new();
     private bool _progressDrainScheduled;
@@ -568,7 +569,7 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
         }).ConfigureAwait(true);
 
         if (req?.FromBrowserInterception == true)
-            _browserInterceptedIds.Add(item.Id);
+            _browserIntercepted[item.Id] = new BrowserInterceptionMeta(req.MimeType, req.FileSize);
 
         var vm = GetOrCreateViewModel(item);
         if (startNow) await _engine.StartAsync(item.Id).ConfigureAwait(true);
@@ -1009,26 +1010,39 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
             vm.Apply(snapshot);
             if (!IsTerminal(before) && IsTerminal(snapshot.Status))
             {
-                var err = snapshot.ErrorMessage ?? "";
-                var isAuthOrTokenRejection =
-                    snapshot.DownloadedBytes == 0 &&
-                    (err.Contains("HTTP 403", StringComparison.OrdinalIgnoreCase) ||
-                     err.Contains("HTTP 401", StringComparison.OrdinalIgnoreCase) ||
-                     err.Contains("HTTP 404", StringComparison.OrdinalIgnoreCase) ||
-                     err.Contains("HTTP 410", StringComparison.OrdinalIgnoreCase));
-
-                if (_browserInterceptedIds.Remove(snapshot.Id)
-                    && snapshot.Status == DownloadStatus.Failed
-                    && isAuthOrTokenRejection)
+                if (_browserIntercepted.Remove(snapshot.Id, out var meta))
                 {
-                    var rememberHost = err.Contains("HTTP 403", StringComparison.OrdinalIgnoreCase) ||
-                                       err.Contains("HTTP 401", StringComparison.OrdinalIgnoreCase);
-                    BrowserFallbackRequested?.Invoke(this, (snapshot.Id, snapshot.Url, snapshot.FileName, rememberHost));
-                    // Remove the dead 0-byte stub silently so Nahr stays clean while Chrome finishes the download
-                    _ = RemoveSilentAfterFallbackAsync(snapshot.Id);
-                    Refilter();
-                    RefreshCounts();
-                    return;
+                    var err = snapshot.ErrorMessage ?? "";
+                    var isAuthOrTokenRejection =
+                        snapshot.Status == DownloadStatus.Failed &&
+                        snapshot.DownloadedBytes == 0 &&
+                        (err.Contains("HTTP 403", StringComparison.OrdinalIgnoreCase) ||
+                         err.Contains("HTTP 401", StringComparison.OrdinalIgnoreCase) ||
+                         err.Contains("HTTP 404", StringComparison.OrdinalIgnoreCase) ||
+                         err.Contains("HTTP 410", StringComparison.OrdinalIgnoreCase));
+
+                    if (isAuthOrTokenRejection)
+                    {
+                        var rememberHost = err.Contains("HTTP 403", StringComparison.OrdinalIgnoreCase) ||
+                                           err.Contains("HTTP 401", StringComparison.OrdinalIgnoreCase);
+                        BrowserFallbackRequested?.Invoke(this, (snapshot.Id, snapshot.Url, snapshot.FileName, rememberHost));
+                        // Remove the dead 0-byte stub silently so Nahr stays clean while Chrome finishes the download
+                        _ = RemoveSilentAfterFallbackAsync(snapshot.Id, deleteFile: false);
+                        Refilter();
+                        RefreshCounts();
+                        return;
+                    }
+
+                    if (snapshot.Status == DownloadStatus.Completed && IsUnexpectedHtmlForBinaryFile(snapshot, meta))
+                    {
+                        // Server returned an HTML bot-challenge/login page (e.g. Fastly/Cloudflare 200 text/html)
+                        // instead of the actual binary/PDF file. Delete the bogus HTML file and hand off to Chrome!
+                        BrowserFallbackRequested?.Invoke(this, (snapshot.Id, snapshot.Url, snapshot.FileName, true));
+                        _ = RemoveSilentAfterFallbackAsync(snapshot.Id, deleteFile: true);
+                        Refilter();
+                        RefreshCounts();
+                        return;
+                    }
                 }
                 NotifyFinished(vm);
             }
@@ -1041,7 +1055,48 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
         RefreshCounts();
     }
 
-    private async Task RemoveSilentAfterFallbackAsync(Guid id)
+    private static bool IsUnexpectedHtmlForBinaryFile(DownloadItem snapshot, BrowserInterceptionMeta meta)
+    {
+        var ext = Path.GetExtension(snapshot.FileName ?? "").ToLowerInvariant();
+        var isHtmlExt = ext is ".html" or ".htm" or ".xhtml" or ".mhtml" or ".mht" or ".asp" or ".aspx" or ".php" or ".jsp" or ".txt" or "";
+        var expectedNonHtmlMime = !string.IsNullOrWhiteSpace(meta.ExpectedMimeType)
+            && !meta.ExpectedMimeType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase)
+            && !meta.ExpectedMimeType.StartsWith("application/xhtml", StringComparison.OrdinalIgnoreCase)
+            && !meta.ExpectedMimeType.StartsWith("text/plain", StringComparison.OrdinalIgnoreCase);
+
+        if (isHtmlExt && !expectedNonHtmlMime) return false;
+
+        var serverSentHtml = snapshot.NeedsHtmlWarning == true
+            || (snapshot.ContentType?.StartsWith("text/html", StringComparison.OrdinalIgnoreCase) ?? false)
+            || (snapshot.ContentType?.StartsWith("application/xhtml", StringComparison.OrdinalIgnoreCase) ?? false);
+
+        if (serverSentHtml) return true;
+        return FileLooksLikeHtmlSnippet(snapshot.FilePath, snapshot.DownloadedBytes);
+    }
+
+    private static bool FileLooksLikeHtmlSnippet(string? filePath, long downloadedBytes)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || downloadedBytes <= 0 || downloadedBytes > 256 * 1024)
+            return false;
+        try
+        {
+            if (!File.Exists(filePath)) return false;
+            var buf = new byte[(int)Math.Min(512, downloadedBytes)];
+            using var fs = File.OpenRead(filePath);
+            var n = fs.Read(buf, 0, buf.Length);
+            if (n < 10) return false;
+            var head = System.Text.Encoding.UTF8.GetString(buf, 0, n).TrimStart('\uFEFF', ' ', '\t', '\r', '\n');
+            return head.StartsWith("<!DOCTYPE html", StringComparison.OrdinalIgnoreCase)
+                || head.StartsWith("<html", StringComparison.OrdinalIgnoreCase)
+                || head.StartsWith("<head", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task RemoveSilentAfterFallbackAsync(Guid id, bool deleteFile)
     {
         try
         {
@@ -1051,7 +1106,7 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
                 Downloads.Remove(vm);
                 if (ReferenceEquals(SelectedDownload, vm)) SelectedDownload = null;
             }
-            await _engine.RemoveAsync(id, deleteFile: false).ConfigureAwait(true);
+            await _engine.RemoveAsync(id, deleteFile: deleteFile).ConfigureAwait(true);
             Refilter();
             RefreshCounts();
         }

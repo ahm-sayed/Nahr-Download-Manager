@@ -848,5 +848,75 @@ internal static class YouTubeAndExtensionTests
             var second = await http.GetStringAsync($"http://127.0.0.1:{port}/fallbacks", env.Ct);
             Assert.Equal("""{"items":[]}""", second, "second drain should be empty");
         }),
+
+        new("extension: HTML challenge returned for browser-intercepted PDF deletes bogus file and hands off to Chrome", async env =>
+        {
+            var htmlBody = Encoding.UTF8.GetBytes("<!DOCTYPE html><html lang=\"en\"><head><title>Verification</title></head><body>JS Challenge</body></html>");
+            var port = 40000 + Random.Shared.Next(10000);
+            using var listener = new HttpListener();
+            listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+            listener.Start();
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(env.Ct);
+            var serverLoop = Task.Run(async () =>
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    HttpListenerContext ctx;
+                    try { ctx = await listener.GetContextAsync().WaitAsync(cts.Token); }
+                    catch { break; }
+
+                    ctx.Response.StatusCode = 200;
+                    ctx.Response.ContentType = "text/html; charset=utf-8";
+                    ctx.Response.ContentLength64 = htmlBody.Length;
+                    if (!string.Equals(ctx.Request.HttpMethod, "HEAD", StringComparison.OrdinalIgnoreCase))
+                        await ctx.Response.OutputStream.WriteAsync(htmlBody);
+                    try { ctx.Response.Close(); } catch { }
+                }
+            });
+
+            try
+            {
+                await using var rig = await VmRig.CreateAsync(env);
+                var fallbackTcs = new TaskCompletionSource<(Guid Id, string Url, string? FileName, bool RememberHost)>(TaskCreationOptions.RunContinuationsAsynchronously);
+                DownloadSessionViewModel? session = null;
+
+                await rig.Ui.Run(() =>
+                {
+                    rig.Vm.BrowserFallbackRequested += (_, fb) => fallbackTcs.TrySetResult(fb);
+                    rig.Vm.DownloadWindowRequested += (_, s) => session = s;
+                    rig.Vm.OpenStandaloneDownloadPrompt(new ExtensionDownloadRequest
+                    {
+                        Url = $"http://127.0.0.1:{port}/articles/s41467-021-22464-x.pdf",
+                        Filename = "s41467-021-22464-x.pdf",
+                        MimeType = "application/pdf",
+                        FileSize = 5_200_000,
+                        MediaType = "file",
+                        FromBrowserInterception = true
+                    });
+                });
+
+                Assert.NotNull(session, "session opened");
+                await rig.Ui.RunAsync(() => ((AsyncRelayCommand)session!.StartDownloadCommand).ExecuteAsync());
+
+                var fb = await fallbackTcs.Task.WaitAsync(TimeSpan.FromSeconds(5), env.Ct);
+                Assert.True(fb.Url.EndsWith("s41467-021-22464-x.pdf"), $"fallback url: {fb.Url}");
+                Assert.True(fb.RememberHost, "HTML challenge host should be remembered for direct Chrome downloads");
+
+                // Give silent cleanup task a moment to delete the bogus 3 KB HTML file and remove the row
+                var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+                while (DateTime.UtcNow < deadline && (Directory.GetFiles(env.Dir, "*.pdf").Length > 0 || rig.Vm.Downloads.Count > 0))
+                    await Task.Delay(30, env.Ct);
+
+                Assert.Equal(0, Directory.GetFiles(env.Dir, "*.pdf").Length, "corrupt HTML-masquerading PDF must be deleted from disk");
+                Assert.Equal(0, rig.Vm.Downloads.Count, "bogus completed row must be removed from Nahr");
+            }
+            finally
+            {
+                cts.Cancel();
+                listener.Stop();
+                await serverLoop;
+            }
+        }),
     ];
 }
