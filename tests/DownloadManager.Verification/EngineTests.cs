@@ -584,6 +584,88 @@ public static class EngineTests
                 await serverLoop;
             }
         });
+
+        yield return new TestCase("signed url: HEAD returning 404 falls back to GET and completes", async env =>
+        {
+            const long size = 128 * 1024;
+            var port = GetFreeTcpPort();
+            using var listener = new HttpListener();
+            listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+            listener.Start();
+
+            using var serverCts = CancellationTokenSource.CreateLinkedTokenSource(env.Ct);
+            var serverLoop = Task.Run(async () =>
+            {
+                while (!serverCts.IsCancellationRequested)
+                {
+                    HttpListenerContext ctx;
+                    try { ctx = await listener.GetContextAsync().WaitAsync(serverCts.Token); }
+                    catch { break; }
+
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var req = ctx.Request;
+                            var resp = ctx.Response;
+                            // Signed GET-only URLs (e.g. Silverchair / CloudFront / S3) reject HEAD with 404
+                            if (string.Equals(req.HttpMethod, "HEAD", StringComparison.OrdinalIgnoreCase))
+                            {
+                                resp.StatusCode = 404;
+                                resp.Close();
+                                return;
+                            }
+
+                            var rangeHeader = req.Headers["Range"];
+                            long start = 0, end = size - 1;
+                            var isRange = !string.IsNullOrEmpty(rangeHeader) && rangeHeader.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase);
+                            if (isRange)
+                            {
+                                var parts = rangeHeader!["bytes=".Length..].Split('-');
+                                start = long.Parse(parts[0]);
+                                if (parts.Length > 1 && !string.IsNullOrEmpty(parts[1])) end = long.Parse(parts[1]);
+                                resp.StatusCode = 206;
+                                resp.Headers["Accept-Ranges"] = "bytes";
+                                resp.Headers["Content-Range"] = $"bytes {start}-{end}/{size}";
+                            }
+                            else
+                            {
+                                resp.StatusCode = 200;
+                            }
+                            var len = end - start + 1;
+                            resp.ContentType = "application/pdf";
+                            resp.ContentLength64 = len;
+                            var buf = new byte[32 * 1024];
+                            var offset = start;
+                            var rem = len;
+                            while (rem > 0)
+                            {
+                                var n = (int)Math.Min(buf.Length, rem);
+                                TestData.Fill(buf.AsSpan(0, n), offset, seed: 1);
+                                await resp.OutputStream.WriteAsync(buf.AsMemory(0, n), serverCts.Token);
+                                offset += n;
+                                rem -= n;
+                            }
+                            resp.Close();
+                        }
+                        catch { }
+                    });
+                }
+            });
+
+            try
+            {
+                var engine = env.NewEngine();
+                var item = await env.DownloadAsync(engine, new Uri($"http://127.0.0.1:{port}/genetics1739.pdf?token=abc123"), connections: 4);
+                Assert.FileMatches(item, size);
+            }
+            finally
+            {
+                serverCts.Cancel();
+                listener.Stop();
+                await serverLoop;
+            }
+        });
     }
 
     private static int GetFreeTcpPort()

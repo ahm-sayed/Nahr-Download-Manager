@@ -23,10 +23,10 @@ public sealed class ExtensionServer : IAsyncDisposable
     private Task? _loop;
     private bool _disposed;
 
-    private sealed record BrowserFallbackItem(string Url, string Host, string? FileName);
+    private sealed record BrowserFallbackItem(string Url, string Host, string? FileName, bool RememberHost);
 
-    /// <summary>Queues an extension-intercepted URL that failed with HTTP 403 so Chrome can download it directly.</summary>
-    public void QueueBrowserFallback(string url, string? fileName = null)
+    /// <summary>Queues an extension-intercepted URL that failed with HTTP 401/403/404/410 so Chrome can download it directly.</summary>
+    public void QueueBrowserFallback(string url, string? fileName = null, bool rememberHost = true)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
@@ -35,8 +35,8 @@ public sealed class ExtensionServer : IAsyncDisposable
         while (_browserFallbacks.Count >= 32)
             _browserFallbacks.TryDequeue(out _);
 
-        _browserFallbacks.Enqueue(new BrowserFallbackItem(url, uri.Host.ToLowerInvariant(), fileName));
-        _log.LogInformation("Queued automatic browser fallback for host={Host}", uri.Host);
+        _browserFallbacks.Enqueue(new BrowserFallbackItem(url, uri.Host.ToLowerInvariant(), fileName, rememberHost));
+        _log.LogInformation("Queued automatic browser fallback for host={Host} rememberHost={Remember}", uri.Host, rememberHost);
     }
 
     /// <summary>Raised on a worker thread when a valid download or media request arrives from the browser extension.</summary>
@@ -157,7 +157,7 @@ public sealed class ExtensionServer : IAsyncDisposable
                 var items = new List<object>();
                 while (_browserFallbacks.TryDequeue(out var fb))
                 {
-                    items.Add(new { url = fb.Url, host = fb.Host, fileName = fb.FileName });
+                    items.Add(new { url = fb.Url, host = fb.Host, fileName = fb.FileName, rememberHost = fb.RememberHost });
                 }
                 var payload = JsonSerializer.Serialize(new { items });
                 await WriteJsonAsync(resp, 200, payload).ConfigureAwait(false);

@@ -2,10 +2,10 @@
 <#
   Builds Nahr on Windows, runs the verification suite, publishes the app, and optionally compiles Nahr-Setup.exe.
   Usage:   .\build-windows.ps1                 # build + verify + publish (self-contained)
-           .\build-windows.ps1 -BuildInstaller # also compile .\dist\Nahr-Setup-1.3.3.exe via Inno Setup 6
+           .\build-windows.ps1 -BuildInstaller # also compile .\dist\Nahr-Setup-1.3.4.exe via Inno Setup 6
            .\build-windows.ps1 -SkipTests
            .\build-windows.ps1 -FrameworkDependent
-  Result:  .\publish\Nahr.exe  (and .\dist\Nahr-Setup-1.3.3.exe when -BuildInstaller is set)
+  Result:  .\publish\Nahr.exe  (and .\dist\Nahr-Setup-1.3.4.exe when -BuildInstaller is set)
 #>
 param(
     [switch]$SkipTests,

@@ -86,7 +86,7 @@ async function pollBrowserFallbacksOnce() {
     for (const item of items) {
       if (!item?.url || !/^https?:\/\//i.test(item.url)) continue;
       const host = (item.host || getHostname(item.url) || "").toLowerCase();
-      if (host) {
+      if (host && item.rememberHost !== false) {
         browserOnlyHosts.add(host);
         saveBrowserOnlyHosts();
       }
@@ -536,11 +536,20 @@ chrome.downloads.onCreated.addListener(async (downloadItem) => {
     chrome.downloads.erase({ id: downloadItem.id });
   } catch {}
 
+  let fallbackReferrer = downloadItem.referrer || null;
+  if (!fallbackReferrer && chrome.tabs?.query) {
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const activeUrl = tabs?.[0]?.url;
+      if (activeUrl && /^https?:\/\//i.test(activeUrl)) fallbackReferrer = activeUrl;
+    } catch {}
+  }
+
   try {
     await sendToNahr({
       url,
       filename: downloadItem.filename ? downloadItem.filename.split(/[/\\]/).pop() : null,
-      referrer: downloadItem.referrer || null,
+      referrer: fallbackReferrer,
       userAgent: navigator.userAgent,
       mimeType: downloadItem.mime || null,
       fileSize: downloadItem.totalBytes > 0 ? downloadItem.totalBytes : null,

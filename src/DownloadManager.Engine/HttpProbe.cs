@@ -25,29 +25,45 @@ public static class HttpProbe
     /// </summary>
     public static async Task<ProbeResult> ProbeAsync(HttpClient http, Uri uri, TimeSpan headersTimeout, CancellationToken ct, DownloadItem? item = null)
     {
-        // Try HEAD first with Range: 0-0
-        using var probeResult = await ProbeOnceAsync(http, uri, HttpMethod.Head, headersTimeout, ct, item, sendRange: true).ConfigureAwait(false);
-        if (probeResult.StatusCode != HttpStatusCode.Forbidden && probeResult.StatusCode != HttpStatusCode.MethodNotAllowed)
+        // Signed/tokenized URLs (e.g. Silverchair ?token=, S3/CloudFront ?X-Amz-Signature=) are often
+        // signed strictly for GET and reject HEAD with 403/404 or consume single-use tokens on HEAD.
+        if (!HasSignedQueryToken(uri))
         {
-            return BuildResult(probeResult, uri);
+            using var probeResult = await ProbeOnceAsync(http, uri, HttpMethod.Head, headersTimeout, ct, item, sendRange: true).ConfigureAwait(false);
+            if (probeResult.StatusCode is not (HttpStatusCode.Forbidden or HttpStatusCode.MethodNotAllowed
+                or HttpStatusCode.NotImplemented or HttpStatusCode.BadRequest))
+            {
+                return BuildResult(probeResult, uri);
+            }
         }
 
-        // Fallback 1: GET with Range: 0-0 (some servers block HEAD but allow ranged GET)
+        // Fallback 1 (or primary for signed URLs): GET with Range: 0-0
         using var fallback = await ProbeOnceAsync(http, uri, HttpMethod.Get, headersTimeout, ct, item, sendRange: true).ConfigureAwait(false);
-        if (fallback.StatusCode != HttpStatusCode.Forbidden)
+        if (fallback.IsSuccessStatusCode)
         {
             return BuildResult(fallback, uri);
         }
 
-        // Fallback 2: Plain GET without Range header (some PDF/journal portals reject Range requests with 403)
-        using var plainGet = await ProbeOnceAsync(http, uri, HttpMethod.Get, headersTimeout, ct, item, sendRange: false).ConfigureAwait(false);
-        if (plainGet.StatusCode != HttpStatusCode.Forbidden)
+        // Fallback 2: Plain GET without Range header (some PDF/journal portals reject Range: 0-0 with 400/403/405/416)
+        if (fallback.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Forbidden
+            or HttpStatusCode.MethodNotAllowed or HttpStatusCode.RequestedRangeNotSatisfiable)
         {
+            using var plainGet = await ProbeOnceAsync(http, uri, HttpMethod.Get, headersTimeout, ct, item, sendRange: false).ConfigureAwait(false);
             return BuildResult(plainGet, uri);
         }
 
-        // Still 403 - throw with helpful message
-        throw new DownloadHttpException(HttpStatusCode.Forbidden, null);
+        return BuildResult(fallback, uri);
+    }
+
+    private static bool HasSignedQueryToken(Uri uri)
+    {
+        var q = uri.Query;
+        if (string.IsNullOrEmpty(q)) return false;
+        return q.Contains("token=", StringComparison.OrdinalIgnoreCase)
+            || q.Contains("signature=", StringComparison.OrdinalIgnoreCase)
+            || q.Contains("sig=", StringComparison.OrdinalIgnoreCase)
+            || q.Contains("expires=", StringComparison.OrdinalIgnoreCase)
+            || q.Contains("auth=", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<HttpResponseMessage> ProbeOnceAsync(

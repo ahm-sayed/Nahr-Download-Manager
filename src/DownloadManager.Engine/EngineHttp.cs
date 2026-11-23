@@ -22,7 +22,12 @@ public static class EngineHttp
             ConnectTimeout = options.ConnectTimeout,
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
         };
-        var client = new HttpClient(handler, disposeHandler: true) { Timeout = Timeout.InfiniteTimeSpan };
+        var client = new HttpClient(handler, disposeHandler: true)
+        {
+            Timeout = Timeout.InfiniteTimeSpan,
+            DefaultRequestVersion = HttpVersion.Version20,
+            DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+        };
 
         // Honest defaults — every request will layer on per-download overrides supplied by the user.
         client.DefaultRequestHeaders.UserAgent.ParseAdd(options.UserAgent);

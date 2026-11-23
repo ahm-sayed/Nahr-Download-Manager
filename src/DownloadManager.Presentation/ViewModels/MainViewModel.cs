@@ -60,8 +60,8 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
     private bool _disposed;
     private bool _queuePaused;
 
-    /// <summary>Raised when an extension-intercepted download fails with HTTP 403 so the browser can download it directly.</summary>
-    public event EventHandler<(string Url, string? FileName)>? BrowserFallbackRequested;
+    /// <summary>Raised when an extension-intercepted download fails at 0 bytes with HTTP 401/403/404/410 so the browser can download it directly.</summary>
+    public event EventHandler<(Guid Id, string Url, string? FileName, bool RememberHost)>? BrowserFallbackRequested;
 
     public MainViewModel(IDownloadEngine engine, ISettingsStore settingsStore, AppSettings settings, Localizer loc,
         IUiDispatcher ui, IShellService shell)
@@ -424,6 +424,12 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
                 session.ApplyHlsVariantsProbe(variants);
                 session.ProbeStatus = "";
             }
+            else if (req.FromBrowserInterception && (LooksLikeSignedOrTokenizedUrl(session.Url) || req.FileSize is > 0))
+            {
+                // Avoid burning single-use signed tokens (e.g. ?token= / ?X-Amz-Signature=) or duplicating
+                // probes before the user clicks Start Download.
+                session.ProbeStatus = "";
+            }
             else
             {
                 session.ProbeStatus = Loc["dl_probing"];
@@ -547,7 +553,7 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
             FileName = finalName,
             Connections = _settings.DefaultConnections,
             KnownTotalBytes = isHls ? null : session.KnownBytes,
-            SkipInitialProbe = isHls || session.KnownBytes is > 0,
+            SkipInitialProbe = isHls || session.KnownBytes is > 0 || (req?.FromBrowserInterception == true && LooksLikeSignedOrTokenizedUrl(url)),
             IsHlsStream = isHls,
             ExtractAudioOnly = isHls && wantAudio,
             AudioFormatExt = targetExt,
@@ -573,6 +579,19 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
     {
         if (string.IsNullOrWhiteSpace(req?.Cookies)) return null;
         return new Dictionary<string, string> { ["Cookie"] = req.Cookies! };
+    }
+
+    private static bool LooksLikeSignedOrTokenizedUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        var qIdx = url.IndexOf('?');
+        if (qIdx < 0) return false;
+        var query = url[qIdx..];
+        return query.Contains("token=", StringComparison.OrdinalIgnoreCase)
+            || query.Contains("signature=", StringComparison.OrdinalIgnoreCase)
+            || query.Contains("sig=", StringComparison.OrdinalIgnoreCase)
+            || query.Contains("expires=", StringComparison.OrdinalIgnoreCase)
+            || query.Contains("auth=", StringComparison.OrdinalIgnoreCase);
     }
 
     // ------------------------------------------------------------------ adding downloads (MainWindow dialog)
@@ -990,11 +1009,26 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
             vm.Apply(snapshot);
             if (!IsTerminal(before) && IsTerminal(snapshot.Status))
             {
+                var err = snapshot.ErrorMessage ?? "";
+                var isAuthOrTokenRejection =
+                    snapshot.DownloadedBytes == 0 &&
+                    (err.Contains("HTTP 403", StringComparison.OrdinalIgnoreCase) ||
+                     err.Contains("HTTP 401", StringComparison.OrdinalIgnoreCase) ||
+                     err.Contains("HTTP 404", StringComparison.OrdinalIgnoreCase) ||
+                     err.Contains("HTTP 410", StringComparison.OrdinalIgnoreCase));
+
                 if (_browserInterceptedIds.Remove(snapshot.Id)
                     && snapshot.Status == DownloadStatus.Failed
-                    && snapshot.ErrorMessage?.Contains("HTTP 403", StringComparison.OrdinalIgnoreCase) == true)
+                    && isAuthOrTokenRejection)
                 {
-                    BrowserFallbackRequested?.Invoke(this, (snapshot.Url, snapshot.FileName));
+                    var rememberHost = err.Contains("HTTP 403", StringComparison.OrdinalIgnoreCase) ||
+                                       err.Contains("HTTP 401", StringComparison.OrdinalIgnoreCase);
+                    BrowserFallbackRequested?.Invoke(this, (snapshot.Id, snapshot.Url, snapshot.FileName, rememberHost));
+                    // Remove the dead 0-byte stub silently so Nahr stays clean while Chrome finishes the download
+                    _ = RemoveSilentAfterFallbackAsync(snapshot.Id);
+                    Refilter();
+                    RefreshCounts();
+                    return;
                 }
                 NotifyFinished(vm);
             }
@@ -1005,6 +1039,23 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
         }
         Refilter();
         RefreshCounts();
+    }
+
+    private async Task RemoveSilentAfterFallbackAsync(Guid id)
+    {
+        try
+        {
+            _removed.Add(id);
+            if (_byId.Remove(id, out var vm))
+            {
+                Downloads.Remove(vm);
+                if (ReferenceEquals(SelectedDownload, vm)) SelectedDownload = null;
+            }
+            await _engine.RemoveAsync(id, deleteFile: false).ConfigureAwait(true);
+            Refilter();
+            RefreshCounts();
+        }
+        catch { /* best effort cleanup */ }
     }
 
     /// <summary>True for the states a download never leaves on its own.</summary>

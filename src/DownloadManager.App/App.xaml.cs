@@ -388,7 +388,14 @@ public partial class App : Application
                 if (_viewModel is not null)
                 {
                     _viewModel.BrowserFallbackRequested += (_, fb) =>
-                        _extensionServer?.QueueBrowserFallback(fb.Url, fb.FileName);
+                    {
+                        _extensionServer?.QueueBrowserFallback(fb.Url, fb.FileName, fb.RememberHost);
+                        Dispatcher.BeginInvoke(() =>
+                        {
+                            var win = _downloadWindows.FirstOrDefault(w => w.Session.BoundDownloadId == fb.Id);
+                            win?.Close();
+                        });
+                    };
                 }
                 _extensionServer.Start();
             }
