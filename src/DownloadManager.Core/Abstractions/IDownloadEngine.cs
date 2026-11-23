@@ -10,6 +10,9 @@ public interface IDownloadEngine : IAsyncDisposable
     Task<DownloadItem> AddAsync(AddDownloadRequest request, CancellationToken ct = default);
     Task<(string FileName, long? ContentLength, string? ContentType)> QuickProbeAsync(
         string url, string? referer = null, string? userAgent = null, CancellationToken ct = default);
+    Task<(string FileName, long? ContentLength, string? ContentType)> QuickProbeAsync(
+        string url, string? referer, string? userAgent, Dictionary<string, string>? extraHeaders, CancellationToken ct = default) =>
+        QuickProbeAsync(url, referer, userAgent, ct);
     Task<IReadOnlyList<(string Label, string Url, string? AudioUrl)>> ProbeHlsQualitiesAsync(
         string url, string? referer = null, string? origin = null, string? userAgent = null, CancellationToken ct = default);
     Task StartAsync(Guid id, CancellationToken ct = default);

@@ -3,6 +3,7 @@
 const dot = document.getElementById("statusDot");
 const statusText = document.getElementById("statusText");
 const toggleBtn = document.getElementById("toggleBtn");
+const bypassBtn = document.getElementById("bypassBtn");
 const grabRow = document.getElementById("grabRow");
 const grabMediaBtn = document.getElementById("grabMediaBtn");
 const grabAudioBtn = document.getElementById("grabAudioBtn");
@@ -80,6 +81,15 @@ function updateUI(state) {
   } else {
     grabRow.style.display = "none";
   }
+
+  if (bypassBtn) {
+    bypassBtn.style.display = state.enabled ? "block" : "none";
+    if (state.bypassSecondsLeft > 0) {
+      bypassBtn.textContent = `Browser Download Active (${state.bypassSecondsLeft}s)`;
+    } else {
+      bypassBtn.textContent = "Allow Browser Download (30s)";
+    }
+  }
 }
 
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -96,6 +106,16 @@ toggleBtn.addEventListener("click", () => {
     if (response) updateUI(response);
   });
 });
+
+if (bypassBtn) {
+  bypassBtn.addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "bypassTemporary", ms: 30000 }, (response) => {
+      if (response && response.ok) {
+        bypassBtn.textContent = `Browser Download Active (${response.bypassSecondsLeft || 30}s)`;
+      }
+    });
+  });
+}
 
 function triggerDownload(preferAudio, selectedQualityUrl = null, preferredQualityKey = null) {
   if (!currentTab) return;

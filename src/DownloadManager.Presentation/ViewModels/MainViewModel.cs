@@ -423,7 +423,8 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
             else
             {
                 session.ProbeStatus = Loc["dl_probing"];
-                var (name, len, contentType) = await _engine.QuickProbeAsync(session.Url, req.Referrer, req.UserAgent).ConfigureAwait(true);
+                var probeHeaders = BuildExtensionHeaders(req);
+                var (name, len, contentType) = await _engine.QuickProbeAsync(session.Url, req.Referrer, req.UserAgent, probeHeaders).ConfigureAwait(true);
                 if (contentType is not null && contentType.Contains("mpegurl", StringComparison.OrdinalIgnoreCase))
                 {
                     var variants = await _engine.ProbeHlsQualitiesAsync(session.Url, req.Referrer, req.Origin, req.UserAgent).ConfigureAwait(true);
@@ -553,11 +554,18 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
             Referer = req?.Referrer,
             Origin = req?.Origin,
             UserAgent = req?.UserAgent,
+            ExtraHeaders = BuildExtensionHeaders(req),
         }).ConfigureAwait(true);
 
         var vm = GetOrCreateViewModel(item);
         if (startNow) await _engine.StartAsync(item.Id).ConfigureAwait(true);
         return vm;
+    }
+
+    private static Dictionary<string, string>? BuildExtensionHeaders(ExtensionDownloadRequest? req)
+    {
+        if (string.IsNullOrWhiteSpace(req?.Cookies)) return null;
+        return new Dictionary<string, string> { ["Cookie"] = req.Cookies! };
     }
 
     // ------------------------------------------------------------------ adding downloads (MainWindow dialog)

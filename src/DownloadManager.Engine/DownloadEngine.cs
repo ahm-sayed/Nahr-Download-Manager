@@ -100,8 +100,12 @@ public sealed class DownloadEngine : IDownloadEngine
         }
     }
 
+    public Task<(string FileName, long? ContentLength, string? ContentType)> QuickProbeAsync(
+        string url, string? referer = null, string? userAgent = null, CancellationToken ct = default) =>
+        QuickProbeAsync(url, referer, userAgent, extraHeaders: null, ct);
+
     public async Task<(string FileName, long? ContentLength, string? ContentType)> QuickProbeAsync(
-        string url, string? referer = null, string? userAgent = null, CancellationToken ct = default)
+        string url, string? referer, string? userAgent, Dictionary<string, string>? extraHeaders, CancellationToken ct = default)
     {
         if (!Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
@@ -115,6 +119,7 @@ public sealed class DownloadEngine : IDownloadEngine
                 Url = uri.AbsoluteUri,
                 Referer = string.IsNullOrWhiteSpace(referer) ? null : referer,
                 UserAgent = string.IsNullOrWhiteSpace(userAgent) ? null : userAgent,
+                ExtraHeaders = extraHeaders is { Count: > 0 } ? new Dictionary<string, string>(extraHeaders) : null,
             };
             var probe = await HttpProbe.ProbeAsync(_http, uri, TimeSpan.FromSeconds(10), ct, carrier).ConfigureAwait(false);
             var name = PathSafety.SanitizeFileName(probe.FileName ?? HttpProbe.FileNameFromUri(uri));
@@ -216,8 +221,8 @@ public sealed class DownloadEngine : IDownloadEngine
                     request.AudioBitrateKbps);
         }
 
-        await _store.SaveAsync(item.Snapshot(), ct).ConfigureAwait(false);
-        StatusChanged?.Invoke(this, item.Snapshot());
+        await _store.SaveAsync(item.SanitisedSnapshot(), ct).ConfigureAwait(false);
+        StatusChanged?.Invoke(this, item.SanitisedSnapshot());
 
         return item.Snapshot();
     }
@@ -347,8 +352,8 @@ public sealed class DownloadEngine : IDownloadEngine
             {
                 _log.LogInformation("Recovered interrupted download {Name} at {Bytes} bytes", stored.FileName, stored.DownloadedBytes);
                 stored.Status = DownloadStatus.Paused;     // recovery bypasses the state machine on purpose
-                await _store.SaveAsync(stored.Snapshot(), ct).ConfigureAwait(false);
-                recovered.Add(stored.Snapshot());
+                await _store.SaveAsync(stored.SanitisedSnapshot(), ct).ConfigureAwait(false);
+                recovered.Add(stored.SanitisedSnapshot());
             }
         }
 
@@ -513,7 +518,7 @@ public sealed class DownloadEngine : IDownloadEngine
     {
         DownloadStateMachine.EnsureTransition(item.Status, to);
         item.Status = to;
-        try { await _store.SaveAsync(item.Snapshot()).ConfigureAwait(false); }
+        try { await _store.SaveAsync(item.SanitisedSnapshot()).ConfigureAwait(false); }
         catch (Exception ex) { _log.LogWarning(ex, "Could not persist state of {Name}", item.FileName); }
         StatusChanged?.Invoke(this, item.Snapshot());
     }

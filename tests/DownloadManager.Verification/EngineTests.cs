@@ -508,6 +508,82 @@ public static class EngineTests
                 await serverLoop;
             }
         });
+
+        yield return new TestCase("auth+probe: cookie-gated server rejecting HEAD and Range with 403 succeeds via plain GET", async env =>
+        {
+            const long size = 256 * 1024;
+            var port = GetFreeTcpPort();
+            using var listener = new HttpListener();
+            listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+            listener.Start();
+
+            using var serverCts = CancellationTokenSource.CreateLinkedTokenSource(env.Ct);
+            var serverLoop = Task.Run(async () =>
+            {
+                while (!serverCts.IsCancellationRequested)
+                {
+                    HttpListenerContext ctx;
+                    try { ctx = await listener.GetContextAsync().WaitAsync(serverCts.Token); }
+                    catch { break; }
+
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var req = ctx.Request;
+                            var resp = ctx.Response;
+                            var cookie = req.Headers["Cookie"] ?? "";
+                            if (!cookie.Contains("session=authorized-user", StringComparison.Ordinal) ||
+                                string.Equals(req.HttpMethod, "HEAD", StringComparison.OrdinalIgnoreCase) ||
+                                !string.IsNullOrEmpty(req.Headers["Range"]))
+                            {
+                                resp.StatusCode = 403;
+                                resp.Close();
+                                return;
+                            }
+
+                            resp.StatusCode = 200;
+                            resp.ContentType = "application/pdf";
+                            resp.ContentLength64 = size;
+                            var buf = new byte[32 * 1024];
+                            long offset = 0;
+                            while (offset < size)
+                            {
+                                var n = (int)Math.Min(buf.Length, size - offset);
+                                TestData.Fill(buf.AsSpan(0, n), offset, seed: 1);
+                                await resp.OutputStream.WriteAsync(buf.AsMemory(0, n), serverCts.Token);
+                                offset += n;
+                            }
+                            resp.Close();
+                        }
+                        catch { }
+                    });
+                }
+            });
+
+            try
+            {
+                var store = env.NewStore();
+                var engine = env.NewEngine(store);
+                var item = await engine.AddAsync(new AddDownloadRequest($"http://127.0.0.1:{port}/7077.full.pdf", env.Dir)
+                {
+                    ExtraHeaders = new Dictionary<string, string> { ["Cookie"] = "session=authorized-user" }
+                }, env.Ct);
+                await engine.StartAsync(item.Id, env.Ct);
+                await engine.WaitAsync(item.Id, env.Ct);
+
+                Assert.FileMatches(engine.Get(item.Id)!, size);
+                var stored = await store.GetAsync(item.Id, env.Ct);
+                Assert.True(stored?.ExtraHeaders is null || !stored.ExtraHeaders.Values.Any(v => v.Contains("authorized-user")),
+                    "Cookie value must never be persisted to the store");
+            }
+            finally
+            {
+                serverCts.Cancel();
+                listener.Stop();
+                await serverLoop;
+            }
+        });
     }
 
     private static int GetFreeTcpPort()

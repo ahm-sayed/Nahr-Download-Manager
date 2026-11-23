@@ -4,6 +4,7 @@
   "version": "1.3.2",
   "description": "Official Nahr integration — compact IDM-style video/audio grabber (YouTube, HLS/m3u8 streaming sites, HTML5 media) and download interceptor.",
   "permissions": [
+    "cookies",
     "downloads",
     "nativeMessaging",
     "storage",

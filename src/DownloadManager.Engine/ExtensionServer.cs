@@ -251,6 +251,8 @@ public sealed class ExtensionDownloadRequest
     public string? Referrer { get; set; }
     public string? Origin { get; set; }
     public string? UserAgent { get; set; }
+    /// <summary>Browser session Cookie header forwarded in-memory for authenticated downloads; never persisted or logged.</summary>
+    public string? Cookies { get; set; }
     public string? MimeType { get; set; }
     public long? FileSize { get; set; }
     public bool PreferAudio { get; set; }

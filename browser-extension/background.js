@@ -146,6 +146,26 @@ setInterval(checkConnection, 20000);
 
 // ------------------------------------------------------------------ send to Nahr desktop app
 
+function getCookiesHeader(url) {
+  return new Promise((resolve) => {
+    if (!url || !chrome.cookies?.getAll) {
+      resolve(null);
+      return;
+    }
+    try {
+      chrome.cookies.getAll({ url }, (cookies) => {
+        if (chrome.runtime.lastError || !cookies || cookies.length === 0) {
+          resolve(null);
+          return;
+        }
+        resolve(cookies.map((c) => `${c.name}=${c.value}`).join("; "));
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
 async function postPromptToNahr(payload) {
   const resp = await fetch(`${NAHR_API}/prompt`, {
     method: "POST",
@@ -159,13 +179,19 @@ async function postPromptToNahr(payload) {
 }
 
 async function sendToNahr(payload) {
+  const enriched = { ...payload };
+  if (!enriched.cookies && enriched.url && /^https?:\/\//i.test(enriched.url)) {
+    const cookieHeader = await getCookiesHeader(enriched.url);
+    if (cookieHeader) enriched.cookies = cookieHeader;
+  }
+
   try {
-    return await postPromptToNahr(payload);
+    return await postPromptToNahr(enriched);
   } catch (firstErr) {
     // If Nahr is closed, auto-launch it silently via Native Messaging (IDM-style) and retry immediately!
     const started = await ensureNahrRunning();
     if (!started) throw firstErr;
-    return await postPromptToNahr(payload);
+    return await postPromptToNahr(enriched);
   }
 }
 
@@ -519,7 +545,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     checkConnection().then(() => {
       const tabId = msg.tabId ?? sender.tab?.id;
       const detected = tabId != null ? tabMedia.get(tabId) || [] : [];
-      sendResponse({ enabled: nahrEnabled, connected: nahrConnected, detectedMedia: detected });
+      const bypassSecondsLeft = Math.max(0, Math.ceil((bypassUntil - Date.now()) / 1000));
+      sendResponse({ enabled: nahrEnabled, connected: nahrConnected, detectedMedia: detected, bypassSecondsLeft });
     });
     return true;
   }
@@ -527,6 +554,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "altBypass") {
     bypassUntil = Date.now() + 4000;
     sendResponse({ ok: true });
+    return true;
+  }
+
+  if (msg.type === "bypassTemporary") {
+    const ms = typeof msg.ms === "number" && msg.ms > 0 ? Math.min(msg.ms, 300000) : 30000;
+    bypassUntil = Date.now() + ms;
+    sendResponse({ ok: true, bypassSecondsLeft: Math.ceil(ms / 1000) });
     return true;
   }
 

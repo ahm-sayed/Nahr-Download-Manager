@@ -26,17 +26,24 @@ public static class HttpProbe
     public static async Task<ProbeResult> ProbeAsync(HttpClient http, Uri uri, TimeSpan headersTimeout, CancellationToken ct, DownloadItem? item = null)
     {
         // Try HEAD first with Range: 0-0
-        using var probeResult = await ProbeOnceAsync(http, uri, HttpMethod.Head, headersTimeout, ct, item).ConfigureAwait(false);
-        if (probeResult.StatusCode != HttpStatusCode.Forbidden)
+        using var probeResult = await ProbeOnceAsync(http, uri, HttpMethod.Head, headersTimeout, ct, item, sendRange: true).ConfigureAwait(false);
+        if (probeResult.StatusCode != HttpStatusCode.Forbidden && probeResult.StatusCode != HttpStatusCode.MethodNotAllowed)
         {
             return BuildResult(probeResult, uri);
         }
 
-        // Fallback: GET with Range: 0-0 (some servers block HEAD but allow GET)
-        using var fallback = await ProbeOnceAsync(http, uri, HttpMethod.Get, headersTimeout, ct, item).ConfigureAwait(false);
+        // Fallback 1: GET with Range: 0-0 (some servers block HEAD but allow ranged GET)
+        using var fallback = await ProbeOnceAsync(http, uri, HttpMethod.Get, headersTimeout, ct, item, sendRange: true).ConfigureAwait(false);
         if (fallback.StatusCode != HttpStatusCode.Forbidden)
         {
             return BuildResult(fallback, uri);
+        }
+
+        // Fallback 2: Plain GET without Range header (some PDF/journal portals reject Range requests with 403)
+        using var plainGet = await ProbeOnceAsync(http, uri, HttpMethod.Get, headersTimeout, ct, item, sendRange: false).ConfigureAwait(false);
+        if (plainGet.StatusCode != HttpStatusCode.Forbidden)
+        {
+            return BuildResult(plainGet, uri);
         }
 
         // Still 403 - throw with helpful message
@@ -44,11 +51,12 @@ public static class HttpProbe
     }
 
     private static async Task<HttpResponseMessage> ProbeOnceAsync(
-        HttpClient http, Uri uri, HttpMethod method, TimeSpan headersTimeout, CancellationToken ct, DownloadItem? item)
+        HttpClient http, Uri uri, HttpMethod method, TimeSpan headersTimeout, CancellationToken ct, DownloadItem? item, bool sendRange)
     {
         using var req = new HttpRequestMessage(method, uri);
         ApplyHeaders(req, item, uri);
-        req.Headers.Range = new RangeHeaderValue(0, 0);
+        if (sendRange)
+            req.Headers.Range = new RangeHeaderValue(0, 0);
         req.Headers.AcceptEncoding.ParseAdd("identity");
 
         return await SendForHeadersAsync(http, req, headersTimeout, ct).ConfigureAwait(false);

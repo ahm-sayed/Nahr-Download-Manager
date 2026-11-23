@@ -775,7 +775,7 @@ internal sealed class DownloadJob(
     {
         try
         {
-            var snapshot = item.Snapshot();
+            var snapshot = item.SanitisedSnapshot();
             var handle = _handle;
             if (flush && handle is { IsClosed: false })
                 await Task.Run(() => RandomAccess.FlushToDisk(handle)).ConfigureAwait(false);
