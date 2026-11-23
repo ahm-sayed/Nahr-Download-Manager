@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -17,9 +18,26 @@ public sealed class ExtensionServer : IAsyncDisposable
 
     private readonly HttpListener _listener = new();
     private readonly ILogger _log;
+    private readonly ConcurrentQueue<BrowserFallbackItem> _browserFallbacks = new();
     private CancellationTokenSource? _cts;
     private Task? _loop;
     private bool _disposed;
+
+    private sealed record BrowserFallbackItem(string Url, string Host, string? FileName);
+
+    /// <summary>Queues an extension-intercepted URL that failed with HTTP 403 so Chrome can download it directly.</summary>
+    public void QueueBrowserFallback(string url, string? fileName = null)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            return;
+
+        while (_browserFallbacks.Count >= 32)
+            _browserFallbacks.TryDequeue(out _);
+
+        _browserFallbacks.Enqueue(new BrowserFallbackItem(url, uri.Host.ToLowerInvariant(), fileName));
+        _log.LogInformation("Queued automatic browser fallback for host={Host}", uri.Host);
+    }
 
     /// <summary>Raised on a worker thread when a valid download or media request arrives from the browser extension.</summary>
     public event EventHandler<ExtensionDownloadRequest>? DownloadRequested;
@@ -130,6 +148,18 @@ public sealed class ExtensionServer : IAsyncDisposable
                     pid = Environment.ProcessId,
                     desktop = DesktopName ?? ""
                 });
+                await WriteJsonAsync(resp, 200, payload).ConfigureAwait(false);
+                return;
+            }
+
+            if (path == "/fallbacks" && req.HttpMethod == "GET")
+            {
+                var items = new List<object>();
+                while (_browserFallbacks.TryDequeue(out var fb))
+                {
+                    items.Add(new { url = fb.Url, host = fb.Host, fileName = fb.FileName });
+                }
+                var payload = JsonSerializer.Serialize(new { items });
                 await WriteJsonAsync(resp, 200, payload).ConfigureAwait(false);
                 return;
             }
@@ -256,6 +286,8 @@ public sealed class ExtensionDownloadRequest
     public string? MimeType { get; set; }
     public long? FileSize { get; set; }
     public bool PreferAudio { get; set; }
+    /// <summary>True when this request came from intercepting a browser download (eligible for automatic HTTP 403 browser fallback).</summary>
+    public bool FromBrowserInterception { get; set; }
     /// <summary>"youtube", "playlist", "ytdlp", "hls", "video", "audio", or "file".</summary>
     public string? MediaType { get; set; }
     /// <summary>Optional multiple quality/source URLs detected on a webpage &lt;video&gt; or &lt;audio&gt; player.</summary>

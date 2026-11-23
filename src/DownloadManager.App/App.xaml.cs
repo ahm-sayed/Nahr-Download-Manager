@@ -385,6 +385,11 @@ public partial class App : Application
                         }
                     });
                 };
+                if (_viewModel is not null)
+                {
+                    _viewModel.BrowserFallbackRequested += (_, fb) =>
+                        _extensionServer?.QueueBrowserFallback(fb.Url, fb.FileName);
+                }
                 _extensionServer.Start();
             }
             catch (Exception ex)

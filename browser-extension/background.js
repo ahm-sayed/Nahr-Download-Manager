@@ -10,6 +10,10 @@ let nahrConnected = false;
 let bypassUntil = 0;
 let launchingPromise = null;
 let nativeLaunchCooldownUntil = 0;
+let fallbackPollTimer = null;
+let fallbackPollUntil = 0;
+const browserOnlyHosts = new Set();
+const bypassUrls = new Map(); // url -> expiresAtMs
 
 // Map<tabId, Array<{url, masterUrl, audioUrl, label, extension, fileSize, height, bandwidth, mediaType, isMaster, referer, origin}>>
 const tabMedia = new Map();
@@ -46,12 +50,65 @@ function formatResHead(height) {
   return `${height}p${badge}`;
 }
 
-chrome.storage.local.get(["nahrEnabled"], (res) => {
-  if (typeof res.nahrEnabled === "boolean") {
-    nahrEnabled = res.nahrEnabled;
-    updateBadge();
-  }
+const storageReady = new Promise((resolve) => {
+  chrome.storage.local.get(["nahrEnabled", "nahrBrowserOnlyHosts"], (res) => {
+    if (typeof res.nahrEnabled === "boolean") {
+      nahrEnabled = res.nahrEnabled;
+      updateBadge();
+    }
+    if (Array.isArray(res.nahrBrowserOnlyHosts)) {
+      for (const h of res.nahrBrowserOnlyHosts) {
+        if (typeof h === "string" && h) browserOnlyHosts.add(h.toLowerCase());
+      }
+    }
+    resolve();
+  });
 });
+
+function saveBrowserOnlyHosts() {
+  chrome.storage.local.set({ nahrBrowserOnlyHosts: [...browserOnlyHosts] });
+}
+
+function getHostname(url) {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+async function pollBrowserFallbacksOnce() {
+  try {
+    const resp = await fetch(`${NAHR_API}/fallbacks`, { method: "GET" });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const items = Array.isArray(data?.items) ? data.items : [];
+    for (const item of items) {
+      if (!item?.url || !/^https?:\/\//i.test(item.url)) continue;
+      const host = (item.host || getHostname(item.url) || "").toLowerCase();
+      if (host) {
+        browserOnlyHosts.add(host);
+        saveBrowserOnlyHosts();
+      }
+      bypassUrls.set(item.url, Date.now() + 60000);
+      try {
+        chrome.downloads.download({ url: item.url });
+      } catch {}
+    }
+  } catch {}
+}
+
+function startFallbackWatcher(durationMs = 45000) {
+  fallbackPollUntil = Math.max(fallbackPollUntil, Date.now() + durationMs);
+  if (fallbackPollTimer) return;
+  fallbackPollTimer = setInterval(async () => {
+    await pollBrowserFallbacksOnce();
+    if (Date.now() >= fallbackPollUntil) {
+      clearInterval(fallbackPollTimer);
+      fallbackPollTimer = null;
+    }
+  }, 1200);
+}
 
 // ------------------------------------------------------------------ connection check & Native Messaging auto-launch
 
@@ -453,12 +510,23 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 // ------------------------------------------------------------------ download interception
 
 chrome.downloads.onCreated.addListener(async (downloadItem) => {
+  await storageReady;
   if (!nahrEnabled) return;
+  if (downloadItem.byExtensionId && downloadItem.byExtensionId === chrome.runtime.id) return;
   if (Date.now() < bypassUntil) return;
 
   const url = downloadItem.finalUrl || downloadItem.url;
   if (!url || url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("chrome")) return;
   if (EXCLUDED_URL_PATTERNS.some((rx) => rx.test(url))) return;
+
+  const urlExp = bypassUrls.get(url);
+  if (urlExp && Date.now() < urlExp) {
+    bypassUrls.delete(url);
+    return;
+  }
+
+  const host = getHostname(url);
+  if (host && browserOnlyHosts.has(host)) return;
 
   const alive = nahrConnected || (await ensureNahrRunning());
   if (!alive) return;
@@ -476,8 +544,10 @@ chrome.downloads.onCreated.addListener(async (downloadItem) => {
       userAgent: navigator.userAgent,
       mimeType: downloadItem.mime || null,
       fileSize: downloadItem.totalBytes > 0 ? downloadItem.totalBytes : null,
-      mediaType: "file"
+      mediaType: "file",
+      fromBrowserInterception: true
     });
+    startFallbackWatcher(45000);
   } catch (err) {
     console.error("[Nahr] Failed to send download:", err);
   }
@@ -542,11 +612,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "checkConnection") {
-    checkConnection().then(() => {
+    Promise.all([storageReady, checkConnection()]).then(() => {
       const tabId = msg.tabId ?? sender.tab?.id;
       const detected = tabId != null ? tabMedia.get(tabId) || [] : [];
       const bypassSecondsLeft = Math.max(0, Math.ceil((bypassUntil - Date.now()) / 1000));
-      sendResponse({ enabled: nahrEnabled, connected: nahrConnected, detectedMedia: detected, bypassSecondsLeft });
+      const siteHost = getHostname(msg.tabUrl || sender.tab?.url || "");
+      const isBrowserOnlyHost = !!(siteHost && browserOnlyHosts.has(siteHost));
+      sendResponse({
+        enabled: nahrEnabled,
+        connected: nahrConnected,
+        detectedMedia: detected,
+        bypassSecondsLeft,
+        siteHost,
+        isBrowserOnlyHost
+      });
+    });
+    return true;
+  }
+
+  if (msg.type === "toggleSiteBrowserOnly") {
+    storageReady.then(() => {
+      const host = (msg.host || "").toLowerCase();
+      if (host) {
+        if (browserOnlyHosts.has(host)) browserOnlyHosts.delete(host);
+        else browserOnlyHosts.add(host);
+        saveBrowserOnlyHosts();
+      }
+      sendResponse({ ok: true, siteHost: host, isBrowserOnlyHost: !!(host && browserOnlyHosts.has(host)) });
     });
     return true;
   }

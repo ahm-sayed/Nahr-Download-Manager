@@ -29,6 +29,7 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
     private readonly Dictionary<Guid, DownloadItemViewModel> _byId = new();
     private readonly Dictionary<string, DownloadItemViewModel> _playlistGroups = new(StringComparer.Ordinal);
     private readonly HashSet<Guid> _removed = new();
+    private readonly HashSet<Guid> _browserInterceptedIds = new();
     private readonly object _progressGate = new();
     private readonly Dictionary<Guid, DownloadProgress> _pendingProgress = new();
     private bool _progressDrainScheduled;
@@ -58,6 +59,9 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
     private int _activeCount;
     private bool _disposed;
     private bool _queuePaused;
+
+    /// <summary>Raised when an extension-intercepted download fails with HTTP 403 so the browser can download it directly.</summary>
+    public event EventHandler<(string Url, string? FileName)>? BrowserFallbackRequested;
 
     public MainViewModel(IDownloadEngine engine, ISettingsStore settingsStore, AppSettings settings, Localizer loc,
         IUiDispatcher ui, IShellService shell)
@@ -557,6 +561,9 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
             ExtraHeaders = BuildExtensionHeaders(req),
         }).ConfigureAwait(true);
 
+        if (req?.FromBrowserInterception == true)
+            _browserInterceptedIds.Add(item.Id);
+
         var vm = GetOrCreateViewModel(item);
         if (startNow) await _engine.StartAsync(item.Id).ConfigureAwait(true);
         return vm;
@@ -981,7 +988,16 @@ public sealed class MainViewModel : ObservableObject, IDownloadActions, IAsyncDi
         {
             var before = vm.Status;
             vm.Apply(snapshot);
-            if (!IsTerminal(before) && IsTerminal(snapshot.Status)) NotifyFinished(vm);
+            if (!IsTerminal(before) && IsTerminal(snapshot.Status))
+            {
+                if (_browserInterceptedIds.Remove(snapshot.Id)
+                    && snapshot.Status == DownloadStatus.Failed
+                    && snapshot.ErrorMessage?.Contains("HTTP 403", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    BrowserFallbackRequested?.Invoke(this, (snapshot.Url, snapshot.FileName));
+                }
+                NotifyFinished(vm);
+            }
         }
         else
         {

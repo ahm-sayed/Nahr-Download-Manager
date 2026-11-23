@@ -831,5 +831,22 @@ internal static class YouTubeAndExtensionTests
             Assert.Equal(204, (int)resp.StatusCode, "OPTIONS should return 204");
             Assert.True(resp.Headers.Contains("Access-Control-Allow-Origin"), "should have CORS header");
         }),
+
+        new("extension: server queues and drains browser fallback URLs on HTTP 403", async env =>
+        {
+            var port = 40000 + Random.Shared.Next(10000);
+            await using var server = new ExtensionServer(port);
+            server.Start();
+
+            server.QueueBrowserFallback("https://onlinelibrary.wiley.com/doi/pdfdirect/10.1111/epi.18701", "epi.18701.pdf");
+
+            using var http = new HttpClient();
+            var first = await http.GetStringAsync($"http://127.0.0.1:{port}/fallbacks", env.Ct);
+            Assert.True(first.Contains("onlinelibrary.wiley.com", StringComparison.Ordinal), $"expected queued host: {first}");
+            Assert.True(first.Contains("epi.18701", StringComparison.Ordinal), $"expected queued url: {first}");
+
+            var second = await http.GetStringAsync($"http://127.0.0.1:{port}/fallbacks", env.Ct);
+            Assert.Equal("""{"items":[]}""", second, "second drain should be empty");
+        }),
     ];
 }

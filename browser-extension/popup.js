@@ -4,7 +4,9 @@ const dot = document.getElementById("statusDot");
 const statusText = document.getElementById("statusText");
 const toggleBtn = document.getElementById("toggleBtn");
 const bypassBtn = document.getElementById("bypassBtn");
+const siteModeBtn = document.getElementById("siteModeBtn");
 const grabRow = document.getElementById("grabRow");
+let currentSiteHost = null;
 const grabMediaBtn = document.getElementById("grabMediaBtn");
 const grabAudioBtn = document.getElementById("grabAudioBtn");
 const qualityList = document.getElementById("qualityList");
@@ -90,13 +92,30 @@ function updateUI(state) {
       bypassBtn.textContent = "Allow Browser Download (30s)";
     }
   }
+
+  if (siteModeBtn) {
+    currentSiteHost = state.siteHost || null;
+    if (state.enabled && currentSiteHost) {
+      siteModeBtn.style.display = "block";
+      if (state.isBrowserOnlyHost) {
+        siteModeBtn.textContent = `Chrome Direct on ${currentSiteHost} (Switch to Nahr)`;
+        siteModeBtn.className = "btn btn-primary";
+      } else {
+        siteModeBtn.textContent = `Use Chrome Directly on ${currentSiteHost}`;
+        siteModeBtn.className = "btn btn-secondary";
+      }
+    } else {
+      siteModeBtn.style.display = "none";
+    }
+  }
 }
 
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
   currentTab = tabs && tabs[0] ? tabs[0] : null;
   const tabId = currentTab ? currentTab.id : null;
+  const tabUrl = currentTab ? currentTab.url : null;
 
-  chrome.runtime.sendMessage({ type: "checkConnection", tabId }, (response) => {
+  chrome.runtime.sendMessage({ type: "checkConnection", tabId, tabUrl }, (response) => {
     if (response) updateUI(response);
   });
 });
@@ -106,6 +125,23 @@ toggleBtn.addEventListener("click", () => {
     if (response) updateUI(response);
   });
 });
+
+if (siteModeBtn) {
+  siteModeBtn.addEventListener("click", () => {
+    if (!currentSiteHost) return;
+    chrome.runtime.sendMessage({ type: "toggleSiteBrowserOnly", host: currentSiteHost }, (response) => {
+      if (response && response.ok) {
+        if (response.isBrowserOnlyHost) {
+          siteModeBtn.textContent = `Chrome Direct on ${currentSiteHost} (Switch to Nahr)`;
+          siteModeBtn.className = "btn btn-primary";
+        } else {
+          siteModeBtn.textContent = `Use Chrome Directly on ${currentSiteHost}`;
+          siteModeBtn.className = "btn btn-secondary";
+        }
+      }
+    });
+  });
+}
 
 if (bypassBtn) {
   bypassBtn.addEventListener("click", () => {
