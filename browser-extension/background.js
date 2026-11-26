@@ -14,6 +14,7 @@ let fallbackPollTimer = null;
 let fallbackPollUntil = 0;
 const browserOnlyHosts = new Set();
 const bypassUrls = new Map(); // url -> expiresAtMs
+const handledDownloadIds = new Set();
 
 // Map<tabId, Array<{url, masterUrl, audioUrl, label, extension, fileSize, height, bandwidth, mediaType, isMaster, referer, origin}>>
 const tabMedia = new Map();
@@ -510,6 +511,23 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 // ------------------------------------------------------------------ download interception
 
 chrome.downloads.onCreated.addListener(async (downloadItem) => {
+  // CRITICAL: On browser startup, Chrome replays historical completed/interrupted downloads through
+  // downloads.onCreated. Ignore anything that is not a brand-new, currently in-progress download!
+  if (!downloadItem || downloadItem.state !== "in_progress") return;
+  if (downloadItem.endTime) return;
+  if (downloadItem.startTime) {
+    const startedMs = Date.parse(downloadItem.startTime);
+    if (!Number.isNaN(startedMs) && Date.now() - startedMs > 30000) return;
+  }
+  if (downloadItem.id != null) {
+    if (handledDownloadIds.has(downloadItem.id)) return;
+    handledDownloadIds.add(downloadItem.id);
+    if (handledDownloadIds.size > 500) {
+      const firstId = handledDownloadIds.values().next().value;
+      handledDownloadIds.delete(firstId);
+    }
+  }
+
   await storageReady;
   if (!nahrEnabled) return;
   if (downloadItem.byExtensionId && downloadItem.byExtensionId === chrome.runtime.id) return;

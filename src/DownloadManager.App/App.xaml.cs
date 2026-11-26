@@ -425,6 +425,17 @@ public partial class App : Application
                 return;
             }
         }
+        else if (session.IsPreDownload && !string.IsNullOrWhiteSpace(session.Url))
+        {
+            // Avoid stacking duplicate Pre-Download prompt windows for the exact same URL
+            var existingPrompt = _downloadWindows.FirstOrDefault(w =>
+                w.Session.IsPreDownload && string.Equals(w.Session.Url, session.Url, StringComparison.OrdinalIgnoreCase));
+            if (existingPrompt is not null)
+            {
+                existingPrompt.BringToFront();
+                return;
+            }
+        }
 
         var win = new DownloadWindow(session);
         _downloadWindows.Add(win);

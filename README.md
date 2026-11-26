@@ -4,7 +4,7 @@
 
 ## Download & Install
 
-Download the latest **`Nahr-Setup-1.3.5.exe`** from [**GitHub Releases**](../../releases/latest) (self-contained Windows x64 installer — no `.NET 10` runtime required).
+Download the latest **`Nahr-Setup-1.3.6.exe`** from [**GitHub Releases**](../../releases/latest) (self-contained Windows x64 installer — no `.NET 10` runtime required).
 
 ## Features
 
@@ -32,7 +32,7 @@ dotnet build DownloadManager.sln -c Release
 # Run the full verification suite (121 tests)
 dotnet run -c Release --no-build --project tests/DownloadManager.Verification
 
-# Build + verify + publish self-contained app (.\publish\Nahr.exe) + build installer (.\dist\Nahr-Setup-1.3.5.exe)
+# Build + verify + publish self-contained app (.\publish\Nahr.exe) + build installer (.\dist\Nahr-Setup-1.3.6.exe)
 .\build-windows.ps1 -BuildInstaller
 ```
 
